@@ -53,8 +53,8 @@ func NewRootCmd() *cobra.Command {
 		Use:   "fbc",
 		Short: "File-based catalog operations",
 		RunE: func(cmd *cobra.Command, args []string) error {
-        	return cmd.Help()
-    	},
+			return cmd.Help()
+		},
 	}
 	root.AddCommand(fbc)
 

@@ -283,6 +283,8 @@ func TestExtractPackageNames_UnreadableCatalogDir_ReturnsError(t *testing.T) {
 // ── ResolveAndValidatePath ───────────────────────────────────────────────────────
 
 func TestResolveAndValidatePath_ValidSubPath(t *testing.T) {
+	// path doesn't exist on disk — takes the ErrNotExist branch and returns
+	// the lexically validated path without symlink resolution
 	base := t.TempDir()
 	resolved, err := resolveAndValidatePath(base, "catalog/my-operator")
 	if err != nil {
@@ -317,5 +319,21 @@ func TestResolveAndValidatePath_SameAsBaseContext(t *testing.T) {
 	}
 	if resolved != filepath.Clean(base) {
 		t.Errorf("got %q, want %q", resolved, filepath.Clean(base))
+	}
+}
+
+func TestResolveAndValidatePath_SymlinkEscapes_ReturnsError(t *testing.T) {
+	base := t.TempDir()
+	outside := t.TempDir()
+
+	// create a symlink inside the build context pointing outside
+	symlinkPath := filepath.Join(base, "evil-operator")
+	if err := os.Symlink(outside, symlinkPath); err != nil {
+		t.Fatalf("failed to create symlink: %v", err)
+	}
+
+	_, err := resolveAndValidatePath(base, "evil-operator")
+	if err == nil {
+		t.Fatal("expected error for symlink escaping build context, got nil")
 	}
 }
