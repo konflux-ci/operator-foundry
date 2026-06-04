@@ -17,25 +17,13 @@ limitations under the License.
 package lifecycle
 
 import (
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
 )
-
-// DockerfileCopyEntry represents an ADD or COPY instruction targeting /configs
-type DockerfileCopyEntry struct {
-	Srcs []string // source paths — local (relative to Dockerfile) or builder stage paths
-	Dest string   // destination path inside the built image
-	From string   // non-empty if COPY --from=<stage> — Srcs are inside a build stage, not local
-}
-
-// IsFromBuildStage returns true if this entry copies from a build stage
-// rather than from the local source tree.
-func (e DockerfileCopyEntry) IsFromBuildStage() bool {
-	return e.From != ""
-}
 
 // ExtractPackageNames attempts to find all OLM package names targeted by the
 // FBC Dockerfile. It tries two options in order:
@@ -132,8 +120,16 @@ func deduplicate(s []string) []string {
 }
 
 // resolveAndValidatePath securely joins subPath to baseContext,
-// returning the resolved absolute path. Returns an error if subPath is absolute
-// or if the resolved path escapes baseContext via directory traversal.
+// returning the symlink-resolved absolute path. Returns an error if subPath is absolute,
+// if the resolved path escapes baseContext via directory traversal, or if the
+// resolved path escapes baseContext via symlinks. If the path does not yet exist,
+// the lexically validated path is returned without symlink resolution.
+//
+// Threat model: this function assumes no concurrent filesystem mutations during
+// execution. It is designed for use in controlled CI/CD build environments (e.g.
+// Tekton workspaces) where the build context is not modified by concurrent actors.
+// A TOCTOU gap exists between validation and subsequent filesystem operations —
+// this is an accepted limitation given the assumed execution environment.
 func resolveAndValidatePath(baseContext, subPath string) (string, error) {
 	if filepath.IsAbs(subPath) {
 		return "", fmt.Errorf("sub path %q must be relative to the build context", subPath)
@@ -151,8 +147,28 @@ func resolveAndValidatePath(baseContext, subPath string) (string, error) {
 
 	rel, err := filepath.Rel(ctxAbs, candidateAbs)
 	if err != nil || strings.HasPrefix(rel, "..") {
-		return "", fmt.Errorf("path %q (resolved: %q) escapes build context %q", subPath, candidateAbs, ctxAbs)
+		return "", fmt.Errorf("path %q escapes the build context", subPath)
 	}
 
-	return candidateAbs, nil
+	// resolve symlinks and re-check boundary
+	resolvedCtx, err := filepath.EvalSymlinks(ctxAbs)
+	if err != nil {
+		return "", fmt.Errorf("failed to resolve symlinks for build context %q: %w", ctxAbs, err)
+	}
+
+	resolvedCandidate, err := filepath.EvalSymlinks(candidateAbs)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			// path doesn't exist yet — return lexically validated path
+			return candidateAbs, nil
+		}
+		return "", fmt.Errorf("failed to resolve symlinks for path %q: %w", candidateAbs, err)
+	}
+
+	rel, err = filepath.Rel(resolvedCtx, resolvedCandidate)
+	if err != nil || strings.HasPrefix(rel, "..") {
+		return "", fmt.Errorf("path %q resolves via symlink to a location outside the build context", subPath)
+	}
+
+	return resolvedCandidate, nil
 }
