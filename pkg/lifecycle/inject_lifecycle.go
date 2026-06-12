@@ -27,6 +27,8 @@ import (
 	"github.com/konflux-ci/operator-foundry/pkg/ocp"
 )
 
+const lifecycleMinOCPVersion = "5.0"
+
 // InjectLifecycle is the main entry point for the lifecycle injection workflow.
 // It parses the target Dockerfile, checks if all targeted OCP versions require
 // lifecycle injection (>= 5.0), and injects pre-generated lifecycle.json files
@@ -46,7 +48,7 @@ func InjectLifecycle(dockerfilePath, buildContextPath, lifecycleDir, packages st
 		return fmt.Errorf("failed to get OCP versions: %w", err)
 	}
 
-	gte, err := ocp.AllOCPVersionsGTE(ocpVersions, "5.0")
+	gte, err := ocp.AllOCPVersionsGTE(ocpVersions, lifecycleMinOCPVersion)
 	if err != nil {
 		return fmt.Errorf("failed to compare OCP versions: %w", err)
 	}
