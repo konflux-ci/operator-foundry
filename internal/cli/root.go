@@ -21,6 +21,7 @@ import (
 	"os"
 
 	"github.com/konflux-ci/operator-foundry/internal/cli/fbc"
+	"github.com/konflux-ci/operator-foundry/internal/cli/testoutput"
 	"github.com/spf13/cobra"
 )
 
@@ -50,6 +51,7 @@ func NewRootCmd() *cobra.Command {
 
 	root.PersistentFlags().StringVar(&logLevel, "log-level", "info", "Log level: debug, info, warn, error")
 	root.AddCommand(fbc.NewFBCCmd())
+	root.AddCommand(testoutput.NewMakeResultJSONCmd())
 
 	return root
 }
