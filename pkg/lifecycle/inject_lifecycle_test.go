@@ -227,6 +227,7 @@ COPY catalog /configs
 func TestInjectLifecycle_MultiplePackages_SeparateCOPYEntries(t *testing.T) {
 	base := t.TempDir()
 	lifecycleDir := t.TempDir()
+	lifecycleData := []byte(`{"schema":"io.openshift.operators.lifecycles.v1alpha1"}`)
 
 	for _, pkg := range []string{"operator-a", "operator-b"} {
 		if err := os.MkdirAll(filepath.Join(base, "catalog", pkg), 0755); err != nil {
@@ -236,7 +237,7 @@ func TestInjectLifecycle_MultiplePackages_SeparateCOPYEntries(t *testing.T) {
 		if err := os.MkdirAll(pkgLifecycleDir, 0755); err != nil {
 			t.Fatalf("failed to create lifecycle pkg dir: %v", err)
 		}
-		if err := os.WriteFile(filepath.Join(pkgLifecycleDir, "lifecycle.json"), []byte(`{}`), 0644); err != nil {
+		if err := os.WriteFile(filepath.Join(pkgLifecycleDir, "lifecycle.json"), lifecycleData, 0644); err != nil {
 			t.Fatalf("failed to write lifecycle file: %v", err)
 		}
 	}
@@ -314,6 +315,7 @@ COPY catalog /configs
 func TestInjectLifecycle_DuplicatePackageNames_DeduplicatedCorrectly(t *testing.T) {
 	base := t.TempDir()
 	lifecycleDir := t.TempDir()
+	lifecycleData := []byte(`{"schema":"io.openshift.operators.lifecycles.v1alpha1"}`)
 
 	pkgDir := filepath.Join(base, "catalog", "my-operator")
 	if err := os.MkdirAll(pkgDir, 0755); err != nil {
@@ -324,7 +326,7 @@ func TestInjectLifecycle_DuplicatePackageNames_DeduplicatedCorrectly(t *testing.
 	if err := os.MkdirAll(pkgLifecycleDir, 0755); err != nil {
 		t.Fatalf("failed to create lifecycle pkg dir: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(pkgLifecycleDir, "lifecycle.json"), []byte(`{}`), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(pkgLifecycleDir, "lifecycle.json"), lifecycleData, 0644); err != nil {
 		t.Fatalf("failed to write lifecycle file: %v", err)
 	}
 

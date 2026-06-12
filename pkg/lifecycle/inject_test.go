@@ -106,7 +106,7 @@ func TestInjectLifecycleJSON_MultipleSrcs_CorrectOneUsed(t *testing.T) {
 	}
 
 	lifecyclePath := filepath.Join(base, "lifecycle.json")
-	lifecycleData := []byte(`{}`)
+	lifecycleData := []byte(`{"schema":"io.openshift.operators.lifecycles.v1alpha1"}`)
 	if err := os.WriteFile(lifecyclePath, lifecycleData, 0644); err != nil {
 		t.Fatalf("failed to write lifecycle.json: %v", err)
 	}
@@ -134,7 +134,8 @@ func TestInjectLifecycleJSON_PackageNotFound_ReturnsFalse(t *testing.T) {
 	}
 
 	lifecyclePath := filepath.Join(base, "lifecycle.json")
-	if err := os.WriteFile(lifecyclePath, []byte(`{}`), 0644); err != nil {
+	lifecycleData := []byte(`{"schema":"io.openshift.operators.lifecycles.v1alpha1"}`)
+	if err := os.WriteFile(lifecyclePath, lifecycleData, 0644); err != nil {
 		t.Fatalf("failed to write lifecycle.json: %v", err)
 	}
 
@@ -199,7 +200,8 @@ func TestInjectLifecycleJSON_RejectsPathTraversal(t *testing.T) {
 	base := t.TempDir()
 
 	lifecyclePath := filepath.Join(base, "lifecycle.json")
-	if err := os.WriteFile(lifecyclePath, []byte(`{}`), 0644); err != nil {
+	lifecycleData := []byte(`{"schema":"io.openshift.operators.lifecycles.v1alpha1"}`)
+	if err := os.WriteFile(lifecyclePath, lifecycleData, 0644); err != nil {
 		t.Fatalf("failed to write lifecycle.json: %v", err)
 	}
 
@@ -266,7 +268,8 @@ func TestInjectLifecycleJSON_SymlinkPackageDir_ReturnsError(t *testing.T) {
 	}
 
 	lifecyclePath := filepath.Join(base, "lifecycle.json")
-	if err := os.WriteFile(lifecyclePath, []byte(`{}`), 0644); err != nil {
+	lifecycleData := []byte(`{"schema":"io.openshift.operators.lifecycles.v1alpha1"}`)
+	if err := os.WriteFile(lifecyclePath, lifecycleData, 0644); err != nil {
 		t.Fatalf("failed to write lifecycle.json: %v", err)
 	}
 
@@ -279,13 +282,17 @@ func TestInjectLifecycleJSON_SymlinkPackageDir_ReturnsError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for symlinked package directory, got nil")
 	}
+	if !strings.Contains(err.Error(), "symlink") {
+		t.Errorf("expected symlink error, got: %v", err)
+	}
 }
 
 func TestInjectLifecycleJSON_DestTargetsDifferentPackage_ReturnsError(t *testing.T) {
 	base := t.TempDir()
 
 	lifecyclePath := filepath.Join(base, "lifecycle.json")
-	if err := os.WriteFile(lifecyclePath, []byte(`{}`), 0644); err != nil {
+	lifecycleData := []byte(`{"schema":"io.openshift.operators.lifecycles.v1alpha1"}`)
+	if err := os.WriteFile(lifecyclePath, lifecycleData, 0644); err != nil {
 		t.Fatalf("failed to write lifecycle.json: %v", err)
 	}
 
@@ -307,7 +314,8 @@ func TestInjectLifecycleJSON_MultipleSources(t *testing.T) {
 	buildContext := t.TempDir()
 
 	lifecycleSourcePath := filepath.Join(buildContext, "source-lifecycle.json")
-	err := os.WriteFile(lifecycleSourcePath, []byte(`{"hello":"world"}`), 0644)
+	lifecycleData := []byte(`{"schema":"io.openshift.operators.lifecycles.v1alpha1"}`)
+	err := os.WriteFile(lifecycleSourcePath, lifecycleData, 0644)
 	if err != nil {
 		t.Fatalf("failed to create source lifecycle.json: %v", err)
 	}
@@ -350,7 +358,8 @@ func TestInjectLifecycleJSON_DestWithDeepSubPath_ReturnsError(t *testing.T) {
 	}
 
 	lifecyclePath := filepath.Join(base, "lifecycle.json")
-	if err := os.WriteFile(lifecyclePath, []byte(`{}`), 0644); err != nil {
+	lifecycleData := []byte(`{"schema":"io.openshift.operators.lifecycles.v1alpha1"}`)
+	if err := os.WriteFile(lifecyclePath, lifecycleData, 0644); err != nil {
 		t.Fatalf("failed to write lifecycle.json: %v", err)
 	}
 
@@ -363,13 +372,17 @@ func TestInjectLifecycleJSON_DestWithDeepSubPath_ReturnsError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for deep subpath dest, got nil")
 	}
+	if !strings.Contains(err.Error(), "not a valid FBC path") {
+		t.Errorf("expected deep subpath error, got: %v", err)
+	}
 }
 
 func TestInjectLifecycleJSON_BasenameCoincidence(t *testing.T) {
 	buildContext := t.TempDir()
 
 	lifecycleSourcePath := filepath.Join(buildContext, "source-lifecycle.json")
-	if err := os.WriteFile(lifecycleSourcePath, []byte(`{"hello":"world"}`), 0644); err != nil {
+	lifecycleData := []byte(`{"schema":"io.openshift.operators.lifecycles.v1alpha1"}`)
+	if err := os.WriteFile(lifecycleSourcePath, lifecycleData, 0644); err != nil {
 		t.Fatalf("failed to create source lifecycle.json: %v", err)
 	}
 
@@ -408,13 +421,14 @@ func TestInjectLifecycleJSON_LifecycleAlreadyExists_ReturnsError(t *testing.T) {
 		t.Fatalf("failed to create package dir: %v", err)
 	}
 
+	lifecycleData := []byte(`{"schema":"io.openshift.operators.lifecycles.v1alpha1"}`)
 	// Pre-create lifecycle.json to simulate duplicate injection
-	if err := os.WriteFile(filepath.Join(pkgDir, "lifecycle.json"), []byte(`{}`), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(pkgDir, "lifecycle.json"), lifecycleData, 0644); err != nil {
 		t.Fatalf("failed to pre-create lifecycle.json: %v", err)
 	}
 
 	lifecyclePath := filepath.Join(base, "source-lifecycle.json")
-	if err := os.WriteFile(lifecyclePath, []byte(`{"schema": "io.openshift.operators.lifecycles.v1alpha1"}`), 0644); err != nil {
+	if err := os.WriteFile(lifecyclePath, lifecycleData, 0644); err != nil {
 		t.Fatalf("failed to write source lifecycle.json: %v", err)
 	}
 
@@ -429,5 +443,159 @@ func TestInjectLifecycleJSON_LifecycleAlreadyExists_ReturnsError(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "already exists") {
 		t.Errorf("expected 'already exists' error, got: %v", err)
+	}
+}
+
+func TestInjectLifecycleJSON_LifecycleSchemaAlreadyExists_JSON_ReturnsError(t *testing.T) {
+	base := t.TempDir()
+
+	pkgDir := filepath.Join(base, "catalog", "my-operator")
+	if err := os.MkdirAll(pkgDir, 0755); err != nil {
+		t.Fatalf("failed to create package dir: %v", err)
+	}
+
+	// existing file with lifecycle schema but different name
+	existingData := []byte(`{"schema":"io.openshift.operators.lifecycles.v1alpha1"}`)
+	if err := os.WriteFile(filepath.Join(pkgDir, "lifecycle-custom.json"), existingData, 0644); err != nil {
+		t.Fatalf("failed to write existing lifecycle file: %v", err)
+	}
+
+	lifecyclePath := filepath.Join(base, "lifecycle.json")
+	if err := os.WriteFile(lifecyclePath, existingData, 0644); err != nil {
+		t.Fatalf("failed to write lifecycle.json: %v", err)
+	}
+
+	entry := DockerfileCopyEntry{
+		Srcs: []string{"catalog"},
+		Dest: "/configs",
+	}
+
+	_, err := InjectLifecycleJSON(lifecyclePath, base, "my-operator", entry)
+	if err == nil {
+		t.Fatal("expected error when lifecycle schema already exists, got nil")
+	}
+}
+
+func TestInjectLifecycleJSON_LifecycleSchemaAlreadyExists_YAML_ReturnsError(t *testing.T) {
+	base := t.TempDir()
+
+	pkgDir := filepath.Join(base, "catalog", "my-operator")
+	if err := os.MkdirAll(pkgDir, 0755); err != nil {
+		t.Fatalf("failed to create package dir: %v", err)
+	}
+
+	// existing YAML file with lifecycle schema
+	existingData := []byte("schema: io.openshift.operators.lifecycles.v1alpha1\n")
+	if err := os.WriteFile(filepath.Join(pkgDir, "lifecycle-custom.yaml"), existingData, 0644); err != nil {
+		t.Fatalf("failed to write existing lifecycle yaml file: %v", err)
+	}
+
+	lifecycleData := []byte(`{"schema":"io.openshift.operators.lifecycles.v1alpha1"}`)
+	lifecyclePath := filepath.Join(base, "lifecycle.json")
+	if err := os.WriteFile(lifecyclePath, lifecycleData, 0644); err != nil {
+		t.Fatalf("failed to write lifecycle.json: %v", err)
+	}
+
+	entry := DockerfileCopyEntry{
+		Srcs: []string{"catalog"},
+		Dest: "/configs",
+	}
+
+	_, err := InjectLifecycleJSON(lifecyclePath, base, "my-operator", entry)
+	if err == nil {
+		t.Fatal("expected error when lifecycle schema already exists in YAML, got nil")
+	}
+}
+
+func TestInjectLifecycleJSON_NonLifecycleJSONInDir_DoesNotBlock(t *testing.T) {
+	base := t.TempDir()
+
+	pkgDir := filepath.Join(base, "catalog", "my-operator")
+	if err := os.MkdirAll(pkgDir, 0755); err != nil {
+		t.Fatalf("failed to create package dir: %v", err)
+	}
+
+	// existing catalog.json with different schema — should not block injection
+	catalogData := []byte(`{"schema":"olm.package","name":"my-operator"}`)
+	if err := os.WriteFile(filepath.Join(pkgDir, "catalog.json"), catalogData, 0644); err != nil {
+		t.Fatalf("failed to write catalog.json: %v", err)
+	}
+
+	lifecycleData := []byte(`{"schema":"io.openshift.operators.lifecycles.v1alpha1"}`)
+	lifecyclePath := filepath.Join(base, "lifecycle.json")
+	if err := os.WriteFile(lifecyclePath, lifecycleData, 0644); err != nil {
+		t.Fatalf("failed to write lifecycle.json: %v", err)
+	}
+
+	entry := DockerfileCopyEntry{
+		Srcs: []string{"catalog"},
+		Dest: "/configs",
+	}
+
+	wasInjected, err := InjectLifecycleJSON(lifecyclePath, base, "my-operator", entry)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !wasInjected {
+		t.Fatal("expected lifecycle.json to be injected, got wasInjected=false")
+	}
+}
+
+func TestInjectLifecycleJSON_LifecycleSchemaInCatalogFile_ReturnsError(t *testing.T) {
+	base := t.TempDir()
+
+	pkgDir := filepath.Join(base, "catalog", "my-operator")
+	if err := os.MkdirAll(pkgDir, 0755); err != nil {
+		t.Fatalf("failed to create package dir: %v", err)
+	}
+
+	// lifecycle schema embedded in catalog.json
+	catalogData := []byte(`{"schema":"io.openshift.operators.lifecycles.v1alpha1","package":"my-operator"}`)
+	if err := os.WriteFile(filepath.Join(pkgDir, "catalog.json"), catalogData, 0644); err != nil {
+		t.Fatalf("failed to write catalog.json: %v", err)
+	}
+
+	lifecycleData := []byte(`{"schema":"io.openshift.operators.lifecycles.v1alpha1"}`)
+	lifecyclePath := filepath.Join(base, "lifecycle.json")
+	if err := os.WriteFile(lifecyclePath, lifecycleData, 0644); err != nil {
+		t.Fatalf("failed to write lifecycle.json: %v", err)
+	}
+
+	entry := DockerfileCopyEntry{
+		Srcs: []string{"catalog"},
+		Dest: "/configs",
+	}
+
+	_, err := InjectLifecycleJSON(lifecyclePath, base, "my-operator", entry)
+	if err == nil {
+		t.Fatal("expected error when lifecycle schema exists in catalog.json, got nil")
+	}
+}
+
+func TestHasLifecycleSchema_ValidJSON(t *testing.T) {
+	data := []byte(`{"schema":"io.openshift.operators.lifecycles.v1alpha1"}`)
+	if !hasLifecycleSchema(data) {
+		t.Error("expected true for valid lifecycle schema JSON, got false")
+	}
+}
+
+func TestHasLifecycleSchema_ValidYAML(t *testing.T) {
+	data := []byte("schema: io.openshift.operators.lifecycles.v1alpha1\n")
+	if !hasLifecycleSchema(data) {
+		t.Error("expected true for valid lifecycle schema YAML, got false")
+	}
+}
+
+func TestHasLifecycleSchema_WrongSchema(t *testing.T) {
+	data := []byte(`{"schema":"olm.package"}`)
+	if hasLifecycleSchema(data) {
+		t.Error("expected false for wrong schema, got true")
+	}
+}
+
+func TestHasLifecycleSchema_InvalidData(t *testing.T) {
+	data := []byte(`not valid json or yaml }{`)
+	if hasLifecycleSchema(data) {
+		t.Error("expected false for invalid data, got true")
 	}
 }

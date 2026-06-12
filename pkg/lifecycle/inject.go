@@ -17,12 +17,74 @@ limitations under the License.
 package lifecycle
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"gopkg.in/yaml.v3"
 )
+
+// hasLifecycleSchema reports whether data contains the lifecycle schema
+// 'io.openshift.operators.lifecycles.v1alpha1'. Supports JSON, JSON-lines, and YAML formats.
+func hasLifecycleSchema(data []byte) bool {
+	var obj struct {
+		Schema string `json:"schema" yaml:"schema"`
+	}
+
+	dec := json.NewDecoder(bytes.NewReader(data))
+	for {
+		if err := dec.Decode(&obj); err != nil {
+			break
+		}
+		if obj.Schema == "io.openshift.operators.lifecycles.v1alpha1" {
+			return true
+		}
+	}
+
+	yamlDec := yaml.NewDecoder(bytes.NewReader(data))
+	for {
+		if err := yamlDec.Decode(&obj); err != nil {
+			break
+		}
+		if obj.Schema == "io.openshift.operators.lifecycles.v1alpha1" {
+			return true
+		}
+	}
+
+	return false
+}
+
+// lifecycleSchemaExistsInDir reports whether any .json, .yaml, or .yml file
+// in pkgDir contains the lifecycle schema 'io.openshift.operators.lifecycles.v1alpha1'.
+func lifecycleSchemaExistsInDir(pkgDir string) (bool, error) {
+	entries, err := os.ReadDir(pkgDir)
+	if err != nil {
+		return false, fmt.Errorf("failed to read directory %q: %w", pkgDir, err)
+	}
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		ext := strings.ToLower(filepath.Ext(e.Name()))
+		if ext != ".json" && ext != ".yaml" && ext != ".yml" {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(pkgDir, e.Name()))
+		if err != nil {
+			slog.Warn("failed to read file while checking lifecycle schema", "file", e.Name(), "error", err)
+			continue
+		}
+		if hasLifecycleSchema(data) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
 
 // InjectLifecycleJSON copies a pre-generated lifecycle.json file into the
 // catalog directory for a given package within the build context.
@@ -39,8 +101,14 @@ import (
 //
 // entry must already have variables resolved — use ParseCopyInstructionsForConfigs to obtain them.
 //
-// Note: this function is not idempotent. If lifecycle.json already exists at the
-// destination, it returns an error rather than overwriting the existing file.
+// The source lifecycle.json is validated to contain the expected schema
+// 'io.openshift.operators.lifecycles.v1alpha1' before injection. If the
+// schema is missing or invalid, an error is returned.
+//
+// Note: this function is not idempotent. If a file containing the lifecycle
+// schema 'io.openshift.operators.lifecycles.v1alpha1' already exists in the
+// destination directory (regardless of filename), it returns an error rather
+// than overwriting existing lifecycle data.
 //
 // Known constraint: destination paths deeper than /configs/<package-name> (e.g.,
 // /configs/my-operator/subdir) are rejected. IIB requires the catalog structure
@@ -57,6 +125,10 @@ func InjectLifecycleJSON(lifecycleJSONPath, buildContextPath, pkg string, entry 
 	data, err := os.ReadFile(lifecycleJSONPath)
 	if err != nil {
 		return false, fmt.Errorf("failed to read lifecycle.json from %q: %w", lifecycleJSONPath, err)
+	}
+
+	if !hasLifecycleSchema(data) {
+		return false, fmt.Errorf("lifecycle.json at %q does not contain expected schema 'io.openshift.operators.lifecycles.v1alpha1'", lifecycleJSONPath)
 	}
 
 	dest := strings.Trim(entry.Dest, "/")
@@ -99,6 +171,14 @@ func InjectLifecycleJSON(lifecycleJSONPath, buildContextPath, pkg string, entry 
 
 		if !info.IsDir() {
 			continue
+		}
+
+		exists, err := lifecycleSchemaExistsInDir(pkgDir)
+		if err != nil {
+			return false, fmt.Errorf("failed to check lifecycle schema in %q: %w", pkgDir, err)
+		}
+		if exists {
+			return false, fmt.Errorf("lifecycle data already exists for package %q in %q, refusing to overwrite", pkg, pkgDir)
 		}
 
 		destPath := filepath.Join(pkgDir, "lifecycle.json")
