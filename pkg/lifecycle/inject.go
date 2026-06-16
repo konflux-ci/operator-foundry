@@ -17,34 +17,106 @@ limitations under the License.
 package lifecycle
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"gopkg.in/yaml.v3"
 )
 
-// InjectLifecycleJSON copies a pre-generated lifecycle.json file into the
-// catalog directory for a given package within the build context.
-// It handles three COPY patterns:
-//   - COPY catalog /configs                         → writes to <buildContextPath>/catalog/<pkg>/lifecycle.json
-//   - COPY catalog/my-operator /configs/my-operator → writes to <buildContextPath>/catalog/my-operator/lifecycle.json
-//   - COPY catalog /configs/my-operator             → writes to <buildContextPath>/catalog/my-operator/lifecycle.json
+// hasLifecycleSchema reports whether data contains the lifecycle schema
+// 'io.openshift.operators.lifecycles.v1alpha1'. Supports JSON, JSON-lines, and YAML formats.
+func hasLifecycleSchema(data []byte) bool {
+	jsonMatched := false
+	jsonFullyParsed := true
+
+	dec := json.NewDecoder(bytes.NewReader(data))
+	for {
+		var obj struct {
+			Schema string `json:"schema" yaml:"schema"`
+		}
+		if err := dec.Decode(&obj); err != nil {
+			if !errors.Is(err, io.EOF) {
+				slog.Debug("failed to decode JSON while checking lifecycle schema", "error", err)
+				jsonFullyParsed = false
+			}
+			break
+		}
+		if obj.Schema == "io.openshift.operators.lifecycles.v1alpha1" {
+			return true
+		}
+		jsonMatched = true
+	}
+
+	// skip YAML pass if JSON successfully parsed all content
+	if jsonMatched || jsonFullyParsed {
+		return false
+	}
+
+	yamlDec := yaml.NewDecoder(bytes.NewReader(data))
+	for {
+		var obj struct {
+			Schema string `json:"schema" yaml:"schema"`
+		}
+		if err := yamlDec.Decode(&obj); err != nil {
+			if !errors.Is(err, io.EOF) {
+				slog.Debug("failed to decode YAML while checking lifecycle schema", "error", err)
+			}
+			break
+		}
+		if obj.Schema == "io.openshift.operators.lifecycles.v1alpha1" {
+			return true
+		}
+	}
+
+	return false
+}
+
+// lifecycleSchemaExistsInDir reports whether any .json, .yaml, or .yml file
+// in pkgDir contains the lifecycle schema 'io.openshift.operators.lifecycles.v1alpha1'.
+func lifecycleSchemaExistsInDir(pkgDir string) (bool, error) {
+	entries, err := os.ReadDir(pkgDir)
+	if err != nil {
+		return false, fmt.Errorf("failed to read directory %q: %w", pkgDir, err)
+	}
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		ext := strings.ToLower(filepath.Ext(e.Name()))
+		if ext != ".json" && ext != ".yaml" && ext != ".yml" {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(pkgDir, e.Name()))
+		if err != nil {
+			slog.Warn("failed to read file while checking lifecycle schema", "file", e.Name(), "error", err)
+			continue
+		}
+		if hasLifecycleSchema(data) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// InjectLifecycleJSON copies a pre-generated lifecycle.json into the catalog directory
+// for a given package within the build context. Handles three COPY dest patterns:
+// /configs, /configs/<pkg>, and /configs/<pkg> with a catalog-root src.
 //
-// Return values:
-//   - (true, nil)  — lifecycle.json was successfully injected
-//   - (false, nil) — no matching catalog directory found; not an error,
-//     the caller is responsible for deciding whether to treat this as a failure
-//   - (false, err) — an error occurred during injection
+// Returns (true, nil) on success, (false, nil) if no matching directory was found,
+// or (false, err) on failure.
 //
-// entry must already have variables resolved — use ParseCopyInstructionsForConfigs to obtain them.
+// Errors if: the source file lacks the lifecycle schema, a file with the lifecycle
+// schema already exists in the destination directory, or the dest path is deeper
+// than /configs/<package-name>. Not idempotent.
 //
-// Note: this function is not idempotent. If lifecycle.json already exists at the
-// destination, it returns an error rather than overwriting the existing file.
-//
-// Known constraint: destination paths deeper than /configs/<package-name> (e.g.,
-// /configs/my-operator/subdir) are rejected. IIB requires the catalog structure
-// to be exactly /configs/<package-name>/.
+// entry must have variables resolved — use ParseCopyInstructionsForConfigs.
 func InjectLifecycleJSON(lifecycleJSONPath, buildContextPath, pkg string, entry DockerfileCopyEntry) (bool, error) {
 	if entry.IsFromBuildStage() {
 		return false, fmt.Errorf("cannot inject lifecycle.json into build stage dependencies (COPY --from=%s)", entry.From)
@@ -57,6 +129,10 @@ func InjectLifecycleJSON(lifecycleJSONPath, buildContextPath, pkg string, entry 
 	data, err := os.ReadFile(lifecycleJSONPath)
 	if err != nil {
 		return false, fmt.Errorf("failed to read lifecycle.json from %q: %w", lifecycleJSONPath, err)
+	}
+
+	if !hasLifecycleSchema(data) {
+		return false, fmt.Errorf("lifecycle.json at %q does not contain expected schema 'io.openshift.operators.lifecycles.v1alpha1'", lifecycleJSONPath)
 	}
 
 	dest := strings.Trim(entry.Dest, "/")
@@ -99,6 +175,14 @@ func InjectLifecycleJSON(lifecycleJSONPath, buildContextPath, pkg string, entry 
 
 		if !info.IsDir() {
 			continue
+		}
+
+		exists, err := lifecycleSchemaExistsInDir(pkgDir)
+		if err != nil {
+			return false, fmt.Errorf("failed to check lifecycle schema in %q: %w", pkgDir, err)
+		}
+		if exists {
+			return false, fmt.Errorf("lifecycle data already exists for package %q at %q, refusing to overwrite", pkg, pkgDir)
 		}
 
 		destPath := filepath.Join(pkgDir, "lifecycle.json")

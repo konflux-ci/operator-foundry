@@ -48,7 +48,7 @@ operator-foundry fbc inject-lifecycle \
 | Dockerfile cannot be parsed | Exits with error |
 | Not all OCP versions >= 5.0 | Skips injection silently, exit 0 |
 | `lifecycle.json` missing for a package | Exits with error |
-| `lifecycle.json` already exists at destination | Exits with error — refuses to overwrite |
+| lifecycle schema already exists at destination | Exits with error — refuses to overwrite |
 | No matching catalog directory found for package | Exits with error |
 | Invalid package name (path traversal, empty) | Exits with error |
 | Destination path deeper than `/configs/<package-name>` | Exits with error — not a valid FBC path |
