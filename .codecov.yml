@@ -10,8 +10,12 @@ coverage:
         informational: true
     patch:
       default:
-        target: 80%
+        target: 90%
         informational: true
+
+ignore:
+  - "cmd/**/main.go"
+  - "Dockerfile"
 
 comment:
   layout: "reach,diff,flags,files,footer"
