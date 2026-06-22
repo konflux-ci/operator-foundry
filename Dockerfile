@@ -1,16 +1,14 @@
 FROM registry.access.redhat.com/ubi9/go-toolset:1.26 AS builder
 
-USER root
-
-WORKDIR /build
+WORKDIR /opt/app-root/src
 
 # Cache module downloads separately from source changes
-COPY go.mod go.sum ./
+COPY --chown=1001:0 go.mod go.sum ./
 RUN go mod download
 
-COPY . .
+COPY --chown=1001:0 . .
 
-RUN CGO_ENABLED=0 go build -o operator-foundry ./cmd/operator-foundry
+RUN CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o operator-foundry ./cmd/operator-foundry
 
 ## Final image
 
@@ -25,7 +23,7 @@ LABEL \
   summary="Konflux operator pipeline task CLI" \
   io.openshift.tags="konflux,operator,olm,fbc"
 
-COPY --from=builder /build/operator-foundry /usr/local/bin/operator-foundry
+COPY --from=builder /opt/app-root/src/operator-foundry /usr/local/bin/operator-foundry
 COPY LICENSE /licenses/LICENSE
 
 # OpenShift preflight and Tekton task compatibility

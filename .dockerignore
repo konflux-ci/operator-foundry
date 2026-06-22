@@ -1,4 +1,19 @@
+# Build artifacts
 bin/
+
+# Version control and automation
 .git/
 .github/
 .fullsend/
+
+# Image and local build metadata
+Dockerfile
+.dockerignore
+Makefile
+.gitignore
+
+# Documentation
+*.md
+
+# Secrets and local env
+.env*
