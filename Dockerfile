@@ -2,10 +2,7 @@ FROM registry.access.redhat.com/ubi9/go-toolset:1.26 AS builder
 
 WORKDIR /opt/app-root/src
 
-# Cache module downloads separately from source changes
-COPY --chown=1001:0 go.mod go.sum ./
-RUN go mod download
-
+# Copy all sources, including go.mod and go.sum, at once
 COPY --chown=1001:0 . .
 
 RUN CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o operator-foundry ./cmd/operator-foundry
