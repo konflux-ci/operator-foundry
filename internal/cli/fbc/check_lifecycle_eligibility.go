@@ -26,6 +26,7 @@ import (
 
 func newCheckLifecycleEligibilityCmd() *cobra.Command {
 	var dockerfilePath string
+	var buildContextPath string
 	var outputFile string
 
 	cmd := &cobra.Command{
@@ -35,7 +36,7 @@ func newCheckLifecycleEligibilityCmd() *cobra.Command {
 lifecycle injection, based on whether all OCP versions targeted by
 the Dockerfile are >= the minimum supported version.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			eligible, err := lifecycle.CheckLifecycleEligibility(dockerfilePath)
+			eligible, err := lifecycle.CheckLifecycleEligibility(dockerfilePath, buildContextPath)
 			if err != nil {
 				return err
 			}
@@ -57,6 +58,7 @@ the Dockerfile are >= the minimum supported version.`,
 	}
 
 	cmd.Flags().StringVar(&dockerfilePath, "dockerfile", "", "Path to the FBC Dockerfile (required)")
+	cmd.Flags().StringVar(&buildContextPath, "build-context", ".", "Path to the build context directory (default: .)")
 	cmd.Flags().StringVar(&outputFile, "output", "", "Path to write eligibility result (default: stdout)")
 
 	if err := cmd.MarkFlagRequired("dockerfile"); err != nil {

@@ -22,13 +22,12 @@ import (
 
 func TestCheckLifecycleEligibility_True_WhenOCPVersionGTE5(t *testing.T) {
 	base := t.TempDir()
-
-	dockerfilePath := writeTestDockerfile(t, base, `FROM ubuntu
+	writeTestDockerfile(t, base, `FROM ubuntu
 LABEL com.redhat.fbc.openshift.version=["5.0"]
 COPY catalog /configs
 `)
 
-	eligible, err := CheckLifecycleEligibility(dockerfilePath)
+	eligible, err := CheckLifecycleEligibility("Dockerfile", base)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -39,13 +38,12 @@ COPY catalog /configs
 
 func TestCheckLifecycleEligibility_False_WhenOCPVersionBelow5(t *testing.T) {
 	base := t.TempDir()
-
-	dockerfilePath := writeTestDockerfile(t, base, `FROM ubuntu
+	writeTestDockerfile(t, base, `FROM ubuntu
 LABEL com.redhat.fbc.openshift.version=["4.20"]
 COPY catalog /configs
 `)
 
-	eligible, err := CheckLifecycleEligibility(dockerfilePath)
+	eligible, err := CheckLifecycleEligibility("Dockerfile", base)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -56,13 +54,12 @@ COPY catalog /configs
 
 func TestCheckLifecycleEligibility_False_WhenMixedVersions(t *testing.T) {
 	base := t.TempDir()
-
-	dockerfilePath := writeTestDockerfile(t, base, `FROM ubuntu
+	writeTestDockerfile(t, base, `FROM ubuntu
 LABEL com.redhat.fbc.openshift.version=["4.20","5.0"]
 COPY catalog /configs
 `)
 
-	eligible, err := CheckLifecycleEligibility(dockerfilePath)
+	eligible, err := CheckLifecycleEligibility("Dockerfile", base)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -72,7 +69,7 @@ COPY catalog /configs
 }
 
 func TestCheckLifecycleEligibility_InvalidDockerfile_ReturnsError(t *testing.T) {
-	_, err := CheckLifecycleEligibility("/nonexistent/Dockerfile")
+	_, err := CheckLifecycleEligibility("Dockerfile", "/nonexistent")
 	if err == nil {
 		t.Fatal("expected error for nonexistent Dockerfile, got nil")
 	}
@@ -80,27 +77,26 @@ func TestCheckLifecycleEligibility_InvalidDockerfile_ReturnsError(t *testing.T) 
 
 func TestCheckLifecycleEligibility_EmptyLabel_ReturnsError(t *testing.T) {
 	base := t.TempDir()
-
-	dockerfilePath := writeTestDockerfile(t, base, `FROM ubuntu
+	writeTestDockerfile(t, base, `FROM ubuntu
 LABEL com.redhat.fbc.openshift.version=[]
 COPY catalog /configs
 `)
 
-	_, err := CheckLifecycleEligibility(dockerfilePath)
+	_, err := CheckLifecycleEligibility("Dockerfile", base)
 	if err == nil {
 		t.Fatal("expected error for empty label array, got nil")
 	}
 }
 
+
 func TestCheckLifecycleEligibility_InvalidVersionInLabel_ReturnsError(t *testing.T) {
 	base := t.TempDir()
-
-	dockerfilePath := writeTestDockerfile(t, base, `FROM ubuntu
+	writeTestDockerfile(t, base, `FROM ubuntu
 LABEL com.redhat.fbc.openshift.version=["4.20","invalid"]
 COPY catalog /configs
 `)
 
-	_, err := CheckLifecycleEligibility(dockerfilePath)
+	_, err := CheckLifecycleEligibility("Dockerfile", base)
 	if err == nil {
 		t.Fatal("expected error for invalid OCP version in label, got nil")
 	}

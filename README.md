@@ -18,6 +18,7 @@ injection, based on whether all OCP versions targeted by the Dockerfile are
 ```bash
 operator-foundry fbc check-lifecycle-eligibility \
   --dockerfile <path-to-Dockerfile> \
+  --build-context <path-to-build-context> \
   [--output <path-to-output-file>]
 ```
 
