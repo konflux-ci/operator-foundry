@@ -1,0 +1,12 @@
+# Explicit golangci-lint configuration for CI and local `make lint`.
+# Matches golangci-lint v2.12.2 used in .github/workflows/ci.yaml.
+# See: https://github.com/konflux-ci/operator-foundry/issues/29
+version: "2"
+
+run:
+  go: "1.26.3"
+  timeout: 5m
+
+linters:
+  # Same set golangci-lint enables when no config file is present.
+  default: standard
