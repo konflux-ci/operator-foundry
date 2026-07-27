@@ -54,7 +54,7 @@ COPY catalog /configs
 		t.Fatalf("failed to write lifecycle file: %v", err)
 	}
 
-	if err := InjectLifecycle(dockerfilePath, base, lifecycleDir, "my-operator"); err != nil {
+	if err := InjectLifecycle(dockerfilePath, base, lifecycleDir, "my-operator", nil); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -90,7 +90,7 @@ LABEL com.redhat.fbc.openshift.version=["5.0"]
 COPY catalog /configs
 `)
 
-	if err := InjectLifecycle(dockerfilePath, base, lifecycleDir, "operator-a,operator-b"); err != nil {
+	if err := InjectLifecycle(dockerfilePath, base, lifecycleDir, "operator-a,operator-b", nil); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -129,7 +129,7 @@ COPY catalog /configs
 	}
 
 	// dockerfile path is relative to the build context, not the current directory.
-	if err := InjectLifecycle("catalog.Dockerfile", ctx, lifecycleDir, "my-operator"); err != nil {
+	if err := InjectLifecycle("catalog.Dockerfile", ctx, lifecycleDir, "my-operator", nil); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -155,14 +155,14 @@ LABEL com.redhat.fbc.openshift.version=["5.0"]
 COPY catalog /configs
 `)
 
-	err := InjectLifecycle(dockerfilePath, base, lifecycleDir, "my-operator")
+	err := InjectLifecycle(dockerfilePath, base, lifecycleDir, "my-operator", nil)
 	if err == nil {
 		t.Fatal("expected error for missing lifecycle file, got nil")
 	}
 }
 
 func TestInjectLifecycle_InvalidDockerfile_ReturnsError(t *testing.T) {
-	err := InjectLifecycle("/nonexistent/Dockerfile", t.TempDir(), t.TempDir(), "my-operator")
+	err := InjectLifecycle("/nonexistent/Dockerfile", t.TempDir(), t.TempDir(), "my-operator", nil)
 	if err == nil {
 		t.Fatal("expected error for nonexistent Dockerfile, got nil")
 	}
@@ -192,7 +192,7 @@ COPY catalog /configs
 	}
 
 	// packages string with extra whitespace
-	if err := InjectLifecycle(dockerfilePath, base, lifecycleDir, " my-operator "); err != nil {
+	if err := InjectLifecycle(dockerfilePath, base, lifecycleDir, " my-operator ", nil); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -225,7 +225,7 @@ COPY catalog/operator-a /configs/operator-a
 COPY catalog/operator-b /configs/operator-b
 `)
 
-	if err := InjectLifecycle(dockerfilePath, base, lifecycleDir, "operator-a,operator-b"); err != nil {
+	if err := InjectLifecycle(dockerfilePath, base, lifecycleDir, "operator-a,operator-b", nil); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -244,7 +244,7 @@ COPY catalog /configs
 `)
 
 	for _, packages := range []string{",", ",,", "  ,  ", " "} {
-		err := InjectLifecycle(dockerfilePath, base, t.TempDir(), packages)
+		err := InjectLifecycle(dockerfilePath, base, t.TempDir(), packages, nil)
 		if err == nil {
 			t.Errorf("expected error for degenerate packages string %q, got nil", packages)
 		}
@@ -276,8 +276,58 @@ COPY catalog /configs
 COPY catalog /configs
 `)
 
-	if err := InjectLifecycle(dockerfilePath, base, lifecycleDir, "my-operator"); err != nil {
+	if err := InjectLifecycle(dockerfilePath, base, lifecycleDir, "my-operator", nil); err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+
+	got, err := os.ReadFile(filepath.Join(pkgDir, "lifecycle.json"))
+	if err != nil {
+		t.Fatalf("lifecycle.json not injected: %v", err)
+	}
+	if string(got) != string(lifecycleData) {
+		t.Errorf("content mismatch\ngot: %s\nwant: %s", got, lifecycleData)
+	}
+}
+
+func TestInjectLifecycle_BuildArgResolvesInputDirSourcePath(t *testing.T) {
+	// A stage-scoped ARG with no default, used only in the COPY source path.
+	base := t.TempDir()
+	lifecycleDir := t.TempDir()
+
+	pkgDir := filepath.Join(base, "catalog", "v5.0", "gatekeeper-operator-product")
+	if err := os.MkdirAll(pkgDir, 0755); err != nil {
+		t.Fatalf("failed to create package dir: %v", err)
+	}
+
+	dockerfilePath := writeTestDockerfile(t, base, `ARG OPM_IMAGE=quay.io/operator-framework/opm:latest
+FROM ${OPM_IMAGE} as builder
+LABEL com.redhat.fbc.openshift.version=["5.0"]
+ARG INPUT_DIR
+COPY ./${INPUT_DIR}/ /configs/gatekeeper-operator-product
+RUN ["/bin/opm", "serve", "/configs", "--cache-dir=/tmp/cache", "--cache-only"]
+
+FROM ${OPM_IMAGE}
+COPY --from=builder /configs /configs
+COPY --from=builder /tmp/cache /tmp/cache
+`)
+
+	lifecycleData := []byte(`{"schema":"io.openshift.operators.lifecycles.v1alpha1"}`)
+	pkgLifecycleDir := filepath.Join(lifecycleDir, "gatekeeper-operator-product")
+	if err := os.MkdirAll(pkgLifecycleDir, 0755); err != nil {
+		t.Fatalf("failed to create lifecycle pkg dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(pkgLifecycleDir, "lifecycle.json"), lifecycleData, 0644); err != nil {
+		t.Fatalf("failed to write lifecycle file: %v", err)
+	}
+
+	// Without the matching build-arg, the real catalog subdirectory can't be found.
+	if err := InjectLifecycle(dockerfilePath, base, lifecycleDir, "gatekeeper-operator-product", nil); err == nil {
+		t.Fatal("expected error when INPUT_DIR build-arg is not provided, got nil")
+	}
+
+	buildArgs := map[string]string{"INPUT_DIR": "catalog/v5.0"}
+	if err := InjectLifecycle(dockerfilePath, base, lifecycleDir, "gatekeeper-operator-product", buildArgs); err != nil {
+		t.Fatalf("unexpected error with matching build-arg: %v", err)
 	}
 
 	got, err := os.ReadFile(filepath.Join(pkgDir, "lifecycle.json"))
@@ -313,7 +363,7 @@ COPY catalog /configs
 `)
 
 	// duplicate package name — should be deduplicated and not cause O_EXCL failure
-	if err := InjectLifecycle(dockerfilePath, base, lifecycleDir, "my-operator,my-operator"); err != nil {
+	if err := InjectLifecycle(dockerfilePath, base, lifecycleDir, "my-operator,my-operator", nil); err != nil {
 		t.Fatalf("unexpected error for duplicate package names: %v", err)
 	}
 }

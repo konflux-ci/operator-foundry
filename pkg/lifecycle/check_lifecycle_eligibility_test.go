@@ -30,7 +30,7 @@ LABEL com.redhat.fbc.openshift.version=["5.0"]
 COPY catalog /configs
 `)
 
-	eligible, err := CheckLifecycleEligibility(dockerfilePath, base)
+	eligible, err := CheckLifecycleEligibility(dockerfilePath, base, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -47,7 +47,7 @@ LABEL com.redhat.fbc.openshift.version=["4.20"]
 COPY catalog /configs
 `)
 
-	eligible, err := CheckLifecycleEligibility(dockerfilePath, base)
+	eligible, err := CheckLifecycleEligibility(dockerfilePath, base, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -64,7 +64,7 @@ LABEL com.redhat.fbc.openshift.version=["4.20","5.0"]
 COPY catalog /configs
 `)
 
-	eligible, err := CheckLifecycleEligibility(dockerfilePath, base)
+	eligible, err := CheckLifecycleEligibility(dockerfilePath, base, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -74,7 +74,7 @@ COPY catalog /configs
 }
 
 func TestCheckLifecycleEligibility_InvalidDockerfile_ReturnsError(t *testing.T) {
-	_, err := CheckLifecycleEligibility("/nonexistent/Dockerfile", t.TempDir())
+	_, err := CheckLifecycleEligibility("/nonexistent/Dockerfile", t.TempDir(), nil)
 	if err == nil {
 		t.Fatal("expected error for nonexistent Dockerfile, got nil")
 	}
@@ -94,7 +94,7 @@ COPY catalog /configs
 	}
 
 	// dockerfile path is relative to the build context, not the current directory.
-	eligible, err := CheckLifecycleEligibility("catalog.Dockerfile", filepath.Join(base, "v5.0"))
+	eligible, err := CheckLifecycleEligibility("catalog.Dockerfile", filepath.Join(base, "v5.0"), nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -111,7 +111,7 @@ LABEL com.redhat.fbc.openshift.version=[]
 COPY catalog /configs
 `)
 
-	_, err := CheckLifecycleEligibility(dockerfilePath, base)
+	_, err := CheckLifecycleEligibility(dockerfilePath, base, nil)
 	if err == nil {
 		t.Fatal("expected error for empty label array, got nil")
 	}
@@ -125,7 +125,7 @@ LABEL com.redhat.fbc.openshift.version=["4.20","invalid"]
 COPY catalog /configs
 `)
 
-	_, err := CheckLifecycleEligibility(dockerfilePath, base)
+	_, err := CheckLifecycleEligibility(dockerfilePath, base, nil)
 	if err == nil {
 		t.Fatal("expected error for invalid OCP version in label, got nil")
 	}

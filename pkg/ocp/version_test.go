@@ -41,7 +41,7 @@ func mustParseDockerfile(t *testing.T, src string) *dockerfile.Dockerfile {
 // ── GetOCPVersionsFromDockerfile ────────────────────────────────────────────────────────────
 
 func TestGetOCPVersionsFromDockerfile_NilDockerfile(t *testing.T) {
-	_, err := GetOCPVersionsFromDockerfile(nil)
+	_, err := GetOCPVersionsFromDockerfile(nil, nil)
 	if err == nil {
 		t.Fatal("expected error for nil Dockerfile, got nil")
 	}
@@ -52,7 +52,7 @@ func TestGetOCPVersionsFromDockerfile_FromLabel(t *testing.T) {
 FROM ubuntu
 LABEL com.redhat.fbc.openshift.version=["4.20","4.21","5.0"]
 `)
-	versions, err := GetOCPVersionsFromDockerfile(d)
+	versions, err := GetOCPVersionsFromDockerfile(d, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -68,7 +68,7 @@ func TestGetOCPVersionsFromDockerfile_FromBaseImage(t *testing.T) {
 	d := mustParseDockerfile(t, `
 FROM registry.redhat.io/openshift4/ose-operator-registry-rhel9:v4.15
 `)
-	versions, err := GetOCPVersionsFromDockerfile(d)
+	versions, err := GetOCPVersionsFromDockerfile(d, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -81,7 +81,7 @@ func TestGetOCPVersionsFromDockerfile_FromBaseImageWithPort(t *testing.T) {
 	d := mustParseDockerfile(t, `
 FROM registry.example.com:5000/openshift4/ose-operator-registry-rhel9:v4.15
 `)
-	versions, err := GetOCPVersionsFromDockerfile(d)
+	versions, err := GetOCPVersionsFromDockerfile(d, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -95,7 +95,7 @@ func TestGetOCPVersionsFromDockerfile_LabelTakesPrecedenceOverBaseImage(t *testi
 FROM registry.redhat.io/openshift4/ose-operator-registry-rhel9:v4.15
 LABEL com.redhat.fbc.openshift.version=["4.20","4.21"]
 `)
-	versions, err := GetOCPVersionsFromDockerfile(d)
+	versions, err := GetOCPVersionsFromDockerfile(d, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -112,7 +112,7 @@ func TestGetOCPVersionsFromDockerfile_EmptyLabel_ReturnsError(t *testing.T) {
 FROM ubuntu
 LABEL com.redhat.fbc.openshift.version=[]
 `)
-	_, err := GetOCPVersionsFromDockerfile(d)
+	_, err := GetOCPVersionsFromDockerfile(d, nil)
 	if err == nil {
 		t.Fatal("expected error for empty label array, got nil")
 	}
@@ -123,7 +123,7 @@ func TestGetOCPVersionsFromDockerfile_InvalidLabelFormat_ReturnsError(t *testing
 FROM ubuntu
 LABEL com.redhat.fbc.openshift.version=not-a-json-array
 `)
-	_, err := GetOCPVersionsFromDockerfile(d)
+	_, err := GetOCPVersionsFromDockerfile(d, nil)
 	if err == nil {
 		t.Fatal("expected error for invalid label format, got nil")
 	}
@@ -134,7 +134,7 @@ func TestGetOCPVersionsFromDockerfile_InvalidVersionInLabel_ReturnsError(t *test
 FROM ubuntu
 LABEL com.redhat.fbc.openshift.version=["4.20","invalid"]
 `)
-	_, err := GetOCPVersionsFromDockerfile(d)
+	_, err := GetOCPVersionsFromDockerfile(d, nil)
 	if err == nil {
 		t.Fatal("expected error for invalid OCP version in label, got nil")
 	}
@@ -144,7 +144,7 @@ func TestGetOCPVersionsFromDockerfile_NoLabelNoBaseImageTag_ReturnsError(t *test
 	d := mustParseDockerfile(t, `
 FROM registry.redhat.io/openshift4/ose-operator-registry-rhel9
 `)
-	_, err := GetOCPVersionsFromDockerfile(d)
+	_, err := GetOCPVersionsFromDockerfile(d, nil)
 	if err == nil {
 		t.Fatal("expected error when no label and no versioned base image, got nil")
 	}
@@ -159,7 +159,7 @@ FROM ubuntu
 LABEL com.redhat.fbc.openshift.version=["5.0"]
 COPY --from=builder /catalog /configs
 `)
-	versions, err := GetOCPVersionsFromDockerfile(d)
+	versions, err := GetOCPVersionsFromDockerfile(d, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -174,7 +174,7 @@ FROM ubuntu
 LABEL com.redhat.fbc.openshift.version=["4.20"]
 LABEL com.redhat.fbc.openshift.version=["5.0"]
 `)
-	versions, err := GetOCPVersionsFromDockerfile(d)
+	versions, err := GetOCPVersionsFromDockerfile(d, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -192,7 +192,7 @@ FROM ubuntu
 LABEL com.redhat.fbc.openshift.version=["5.0"]
 COPY --from=builder /catalog /configs
 `)
-	versions, err := GetOCPVersionsFromDockerfile(d)
+	versions, err := GetOCPVersionsFromDockerfile(d, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -211,7 +211,7 @@ LABEL com.redhat.fbc.openshift.version=["4.20"]
 FROM registry.redhat.io/openshift4/ose-operator-registry-rhel9:v5.0
 COPY --from=builder /catalog /configs
 `)
-	versions, err := GetOCPVersionsFromDockerfile(d)
+	versions, err := GetOCPVersionsFromDockerfile(d, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -226,7 +226,7 @@ func TestGetOCPVersionsFromDockerfile_DuplicateKeyInSingleLabel_LastWins(t *test
 FROM ubuntu
 LABEL com.redhat.fbc.openshift.version=["4.20"] com.redhat.fbc.openshift.version=["5.0"]
 `)
-	versions, err := GetOCPVersionsFromDockerfile(d)
+	versions, err := GetOCPVersionsFromDockerfile(d, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -239,7 +239,7 @@ func TestGetOCPVersionsFromDockerfile_TagAndDigestBaseImage_ExtractsTag(t *testi
 	d := mustParseDockerfile(t, `
 FROM registry.redhat.io/openshift4/ose-operator-registry-rhel9:v4.15@sha256:abc123def456abc123def456abc123def456abc123def456abc123def456abcd
 `)
-	versions, err := GetOCPVersionsFromDockerfile(d)
+	versions, err := GetOCPVersionsFromDockerfile(d, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -248,13 +248,107 @@ FROM registry.redhat.io/openshift4/ose-operator-registry-rhel9:v4.15@sha256:abc1
 	}
 }
 
+func TestGetOCPVersionsFromDockerfile_BaseImageTagFromArgDefault_Resolves(t *testing.T) {
+	d := mustParseDockerfile(t, `
+ARG CATALOG_VERSION=v4.15
+FROM registry.redhat.io/openshift4/ose-operator-registry-rhel9:${CATALOG_VERSION}
+`)
+	versions, err := GetOCPVersionsFromDockerfile(d, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(versions) != 1 || versions[0] != "4.15" {
+		t.Errorf("got %v, want [4.15]", versions)
+	}
+}
+
+func TestGetOCPVersionsFromDockerfile_BaseImageTagFromBuildArg_OverridesDefault(t *testing.T) {
+	d := mustParseDockerfile(t, `
+ARG CATALOG_VERSION=v4.15
+FROM registry.redhat.io/openshift4/ose-operator-registry-rhel9:${CATALOG_VERSION}
+`)
+	versions, err := GetOCPVersionsFromDockerfile(d, map[string]string{"CATALOG_VERSION": "v5.0"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(versions) != 1 || versions[0] != "5.0" {
+		t.Errorf("got %v, want [5.0] — build arg should override the ARG default", versions)
+	}
+}
+
+func TestGetOCPVersionsFromDockerfile_BaseImageTagFromUnresolvableArg_ReturnsError(t *testing.T) {
+	d := mustParseDockerfile(t, `
+ARG CATALOG_VERSION
+FROM registry.redhat.io/openshift4/ose-operator-registry-rhel9:${CATALOG_VERSION}
+`)
+	_, err := GetOCPVersionsFromDockerfile(d, nil)
+	if err == nil {
+		t.Fatal("expected error when ARG has no default and no build-arg is provided, got nil")
+	}
+}
+
 func TestGetOCPVersionsFromDockerfile_BaseImageWithNonOCPTag_ReturnsError(t *testing.T) {
 	d := mustParseDockerfile(t, `
 FROM registry.redhat.io/openshift4/ose-operator-registry-rhel9:4.17-ubi9
 `)
-	_, err := GetOCPVersionsFromDockerfile(d)
+	_, err := GetOCPVersionsFromDockerfile(d, nil)
 	if err == nil {
 		t.Fatal("expected error for non-OCP base image tag, got nil")
+	}
+}
+
+func TestGetOCPVersionsFromDockerfile_MultipleBuildArgs_OnlyRelevantOneUsed(t *testing.T) {
+	d := mustParseDockerfile(t, `
+ARG CATALOG_VERSION=v4.15
+ARG OTHER_ARG=unused-default
+FROM registry.redhat.io/openshift4/ose-operator-registry-rhel9:${CATALOG_VERSION}
+`)
+	versions, err := GetOCPVersionsFromDockerfile(d, map[string]string{
+		"OTHER_ARG":                "irrelevant",
+		"CATALOG_VERSION":          "v5.0",
+		"SOME_UNRELATED_THIRD_ARG": "whatever",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(versions) != 1 || versions[0] != "5.0" {
+		t.Errorf("got %v, want [5.0] — should resolve only the ARG referenced in FROM, ignoring unrelated build-args", versions)
+	}
+}
+
+func TestGetOCPVersionsFromDockerfile_MultipleArgsInSameFromLine_BothResolved(t *testing.T) {
+	d := mustParseDockerfile(t, `
+ARG REGISTRY=registry.redhat.io/openshift4
+ARG CATALOG_VERSION=v4.15
+FROM ${REGISTRY}/ose-operator-registry-rhel9:${CATALOG_VERSION}
+`)
+	versions, err := GetOCPVersionsFromDockerfile(d, map[string]string{
+		"REGISTRY":        "registry.example.com/openshift4",
+		"CATALOG_VERSION": "v5.0",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(versions) != 1 || versions[0] != "5.0" {
+		t.Errorf("got %v, want [5.0] — both ARGs referenced in FROM should resolve independently", versions)
+	}
+}
+
+func TestGetOCPVersionsFromDockerfile_LabelPresent_SkipsUnresolvableBaseImageArg(t *testing.T) {
+	// The label path must short-circuit before base image ARG expansion is
+	// attempted, so an unresolvable ARG in FROM must not break builds that
+	// already declare the label.
+	d := mustParseDockerfile(t, `
+ARG CATALOG_VERSION
+FROM registry.redhat.io/openshift4/ose-operator-registry-rhel9:${CATALOG_VERSION}
+LABEL com.redhat.fbc.openshift.version=["5.0"]
+`)
+	versions, err := GetOCPVersionsFromDockerfile(d, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(versions) != 1 || versions[0] != "5.0" {
+		t.Errorf("got %v, want [5.0] — label should be used without touching the unresolvable base image ARG", versions)
 	}
 }
 

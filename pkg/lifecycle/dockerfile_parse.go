@@ -42,11 +42,14 @@ func (e DockerfileCopyEntry) IsFromBuildStage() bool {
 // ParseCopyInstructionsForConfigs returns all ADD/COPY instructions targeting /configs
 // from a parsed Dockerfile.
 //
+// buildArgs resolves any ARG references used in COPY/ADD source or destination
+// paths (e.g. COPY ./${INPUT_DIR}/ /configs/my-operator) and takes precedence
+// over the ARG's own default value declared in the Dockerfile. It may be nil.
+//
 // Known limitations:
 //   - Bash-style variable modifiers (e.g. ${VAR:-default}) are not supported
-//   - ARG values injected via Tekton BUILD_ARGS or BUILD_ARGS_FILE are not resolved
 //   - Wildcard source paths (e.g. catalog/*) targeting /configs are not supported and return an error
-func ParseCopyInstructionsForConfigs(d *dockerfile.Dockerfile) ([]DockerfileCopyEntry, error) {
+func ParseCopyInstructionsForConfigs(d *dockerfile.Dockerfile, buildArgs map[string]string) ([]DockerfileCopyEntry, error) {
 	if d == nil {
 		return nil, fmt.Errorf("dockerfile is nil")
 	}
@@ -68,7 +71,7 @@ func ParseCopyInstructionsForConfigs(d *dockerfile.Dockerfile) ([]DockerfileCopy
 
 		for _, cmd := range stage.Commands {
 			// 1. Update the environment state for this point in the stage
-			updateEnvState(cmd.Command, envMap, envKeys, globalArgs)
+			updateEnvState(cmd.Command, envMap, envKeys, globalArgs, buildArgs)
 
 			var srcs []string
 			var dest, from string
@@ -120,7 +123,11 @@ func buildGlobalArgMap(d *dockerfile.Dockerfile) map[string]string {
 }
 
 // updateEnvState mutates the running environment maps based on ENV and ARG commands.
-func updateEnvState(command interface{}, envMap map[string]string, envKeys map[string]bool, globalArgs map[string]string) {
+//
+// For ARG commands, buildArgs (externally supplied, e.g. via --build-arg) takes
+// precedence over the ARG's own default value declared in the Dockerfile, which
+// in turn takes precedence over a same-named global ARG's default.
+func updateEnvState(command interface{}, envMap map[string]string, envKeys map[string]bool, globalArgs, buildArgs map[string]string) {
 	switch c := command.(type) {
 	case *instructions.EnvCommand:
 		for _, kv := range c.Env {
@@ -132,7 +139,9 @@ func updateEnvState(command interface{}, envMap map[string]string, envKeys map[s
 			if envKeys[arg.Key] {
 				continue
 			}
-			if arg.Value != nil {
+			if val, ok := buildArgs[arg.Key]; ok {
+				envMap[arg.Key] = val
+			} else if arg.Value != nil {
 				envMap[arg.Key] = *arg.Value
 			} else if val, ok := globalArgs[arg.Key]; ok {
 				envMap[arg.Key] = val

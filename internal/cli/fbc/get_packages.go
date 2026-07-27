@@ -29,15 +29,25 @@ func newGetPackagesCmd() *cobra.Command {
 	var dockerfilePath string
 	var buildContextPath string
 	var outputFile string
+	var buildArgFlags []string
 
 	cmd := &cobra.Command{
 		Use:   "get-packages",
 		Short: "Determine OLM package names targeted by an FBC Dockerfile",
 		Long: `Determines the OLM packages included in a File-Based Catalog (FBC)
 by parsing the COPY/ADD instructions in the provided Dockerfile
-and inspecting the corresponding catalog subdirectories in the build context.`,
+and inspecting the corresponding catalog subdirectories in the build context.
+
+If a COPY/ADD source path references a build ARG (e.g.
+COPY ./${INPUT_DIR}/ /configs/my-operator), pass its value with --build-arg so
+it can resolve to the same path the image is actually built with.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			packages, err := lifecycle.GetPackages(dockerfilePath, buildContextPath)
+			buildArgs, err := parseBuildArgs(buildArgFlags)
+			if err != nil {
+				return err
+			}
+
+			packages, err := lifecycle.GetPackages(dockerfilePath, buildContextPath, buildArgs)
 			if err != nil {
 				return err
 			}
@@ -56,6 +66,7 @@ and inspecting the corresponding catalog subdirectories in the build context.`,
 	cmd.Flags().StringVar(&dockerfilePath, "dockerfile", "", "Path to the FBC Dockerfile (required)")
 	cmd.Flags().StringVar(&buildContextPath, "build-context", "", "Path to the build context directory (required)")
 	cmd.Flags().StringVar(&outputFile, "output", "", "Path to write package names (default: stdout)")
+	cmd.Flags().StringArrayVar(&buildArgFlags, "build-arg", nil, "Build arg used to resolve ARG references in COPY/ADD source paths, as KEY=VALUE (may be repeated)")
 
 	for _, flag := range []string{"dockerfile", "build-context"} {
 		if err := cmd.MarkFlagRequired(flag); err != nil {

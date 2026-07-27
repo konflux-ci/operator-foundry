@@ -26,6 +26,7 @@ func newInjectLifecycleCmd() *cobra.Command {
 	var buildContextPath string
 	var lifecycleDir string
 	var packages string
+	var buildArgFlags []string
 
 	cmd := &cobra.Command{
 		Use:   "inject-lifecycle",
@@ -35,9 +36,18 @@ directories for the given OLM packages.
 
 This command does not check OCP eligibility. Callers are expected to have
 already confirmed the Dockerfile is eligible for lifecycle injection via
-"fbc check-lifecycle-eligibility" before calling this command.`,
+"fbc check-lifecycle-eligibility" before calling this command.
+
+If a COPY/ADD source path references a build ARG (e.g.
+COPY ./${INPUT_DIR}/ /configs/my-operator), pass its value with --build-arg so
+the actual catalog directory on disk can be located.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return lifecycle.InjectLifecycle(dockerfilePath, buildContextPath, lifecycleDir, packages)
+			buildArgs, err := parseBuildArgs(buildArgFlags)
+			if err != nil {
+				return err
+			}
+
+			return lifecycle.InjectLifecycle(dockerfilePath, buildContextPath, lifecycleDir, packages, buildArgs)
 		},
 	}
 
@@ -45,6 +55,7 @@ already confirmed the Dockerfile is eligible for lifecycle injection via
 	cmd.Flags().StringVar(&buildContextPath, "build-context", "", "Path to the build context directory (required)")
 	cmd.Flags().StringVar(&lifecycleDir, "lifecycle-dir", "", "Directory containing per-package lifecycle.json files, structured as <dir>/<package>/lifecycle.json (required)")
 	cmd.Flags().StringVar(&packages, "packages", "", "Comma-separated list of package names (required)")
+	cmd.Flags().StringArrayVar(&buildArgFlags, "build-arg", nil, "Build arg used to resolve ARG references in COPY/ADD source paths, as KEY=VALUE (may be repeated)")
 
 	for _, flag := range []string{"dockerfile", "build-context", "lifecycle-dir", "packages"} {
 		if err := cmd.MarkFlagRequired(flag); err != nil {

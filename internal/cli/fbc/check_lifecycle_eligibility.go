@@ -19,6 +19,7 @@ package fbc
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/konflux-ci/operator-foundry/pkg/lifecycle"
 	"github.com/spf13/cobra"
@@ -28,15 +29,25 @@ func newCheckLifecycleEligibilityCmd() *cobra.Command {
 	var dockerfilePath string
 	var buildContextPath string
 	var outputFile string
+	var buildArgFlags []string
 
 	cmd := &cobra.Command{
 		Use:   "check-lifecycle-eligibility",
 		Short: "Check whether an FBC is eligible for lifecycle injection",
 		Long: `Checks whether the File-Based Catalog (FBC) is eligible for
 lifecycle injection, based on whether all OCP versions targeted by
-the Dockerfile are >= the minimum supported version.`,
+the Dockerfile are >= the minimum supported version.
+
+If the base image tag references a build ARG (e.g.
+FROM ...:${CATALOG_VERSION}), pass its value with --build-arg so it can
+resolve to the same tag the image is actually built with.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			eligible, err := lifecycle.CheckLifecycleEligibility(dockerfilePath, buildContextPath)
+			buildArgs, err := parseBuildArgs(buildArgFlags)
+			if err != nil {
+				return err
+			}
+
+			eligible, err := lifecycle.CheckLifecycleEligibility(dockerfilePath, buildContextPath, buildArgs)
 			if err != nil {
 				return err
 			}
@@ -60,6 +71,7 @@ the Dockerfile are >= the minimum supported version.`,
 	cmd.Flags().StringVar(&dockerfilePath, "dockerfile", "", "Path to the FBC Dockerfile (required)")
 	cmd.Flags().StringVar(&buildContextPath, "build-context", "", "Path to the build context directory (required)")
 	cmd.Flags().StringVar(&outputFile, "output", "", "Path to write eligibility result (default: stdout)")
+	cmd.Flags().StringArrayVar(&buildArgFlags, "build-arg", nil, "Build arg used to resolve ARG references in the base image tag, as KEY=VALUE (may be repeated)")
 
 	for _, flag := range []string{"dockerfile", "build-context"} {
 		if err := cmd.MarkFlagRequired(flag); err != nil {
@@ -68,4 +80,20 @@ the Dockerfile are >= the minimum supported version.`,
 	}
 
 	return cmd
+}
+
+// parseBuildArgs parses "KEY=VALUE" flag values into a map.
+func parseBuildArgs(flags []string) (map[string]string, error) {
+	if len(flags) == 0 {
+		return nil, nil
+	}
+	buildArgs := make(map[string]string, len(flags))
+	for _, flag := range flags {
+		key, value, ok := strings.Cut(flag, "=")
+		if !ok || key == "" {
+			return nil, fmt.Errorf("invalid --build-arg %q: expected KEY=VALUE", flag)
+		}
+		buildArgs[key] = value
+	}
+	return buildArgs, nil
 }

@@ -29,8 +29,9 @@ var logLevel string
 
 func NewRootCmd() *cobra.Command {
 	root := &cobra.Command{
-		Use:   "operator-foundry",
-		Short: "CLI for operator pipeline tasks",
+		Use:          "operator-foundry",
+		Short:        "CLI for operator pipeline tasks",
+		SilenceUsage: true,
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 			level := new(slog.LevelVar)
 			switch logLevel {

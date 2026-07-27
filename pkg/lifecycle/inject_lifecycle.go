@@ -32,8 +32,13 @@ import (
 // confirmed eligibility via CheckLifecycleEligibility before calling
 // this function.
 //
+// buildArgs resolves any ARG references used in COPY/ADD source paths (e.g.
+// COPY ./${INPUT_DIR}/ /configs/my-operator) so the actual catalog directory
+// on disk can be located, and should match the build-args the image is
+// actually built with. It may be nil.
+//
 // Returns an error if any package fails to inject.
-func InjectLifecycle(dockerfilePath, buildContextPath, lifecycleDir, packages string) error {
+func InjectLifecycle(dockerfilePath, buildContextPath, lifecycleDir, packages string, buildArgs map[string]string) error {
 	resolvedPath, err := resolveDockerfilePath(dockerfilePath, buildContextPath)
 	if err != nil {
 		return err
@@ -44,7 +49,7 @@ func InjectLifecycle(dockerfilePath, buildContextPath, lifecycleDir, packages st
 		return fmt.Errorf("failed to parse dockerfile %q: %w", resolvedPath, err)
 	}
 
-	entries, err := ParseCopyInstructionsForConfigs(d)
+	entries, err := ParseCopyInstructionsForConfigs(d, buildArgs)
 	if err != nil {
 		return fmt.Errorf("failed to parse COPY instructions: %w", err)
 	}

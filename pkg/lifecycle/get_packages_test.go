@@ -34,7 +34,7 @@ LABEL com.redhat.fbc.openshift.version=["5.0"]
 COPY catalog /configs
 `)
 
-	packages, err := GetPackages(dockerfilePath, base)
+	packages, err := GetPackages(dockerfilePath, base, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -57,7 +57,7 @@ LABEL com.redhat.fbc.openshift.version=["5.0"]
 COPY catalog /configs
 `)
 
-	packages, err := GetPackages(dockerfilePath, base)
+	packages, err := GetPackages(dockerfilePath, base, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -95,7 +95,7 @@ COPY catalog /configs
 	}
 
 	// dockerfile path is relative to the build context, not the current directory.
-	packages, err := GetPackages("catalog.Dockerfile", ctx)
+	packages, err := GetPackages("catalog.Dockerfile", ctx, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -105,9 +105,44 @@ COPY catalog /configs
 }
 
 func TestGetPackages_InvalidDockerfile_ReturnsError(t *testing.T) {
-	_, err := GetPackages("/nonexistent/Dockerfile", t.TempDir())
+	_, err := GetPackages("/nonexistent/Dockerfile", t.TempDir(), nil)
 	if err == nil {
 		t.Fatal("expected error for nonexistent Dockerfile, got nil")
+	}
+}
+
+func TestGetPackages_BuildArgResolvesSourcePath(t *testing.T) {
+	base := t.TempDir()
+
+	if err := os.MkdirAll(filepath.Join(base, "catalog", "v5.0", "my-operator"), 0755); err != nil {
+		t.Fatalf("failed to create package dir: %v", err)
+	}
+
+	// Dest is exactly /configs (Option A doesn't apply), so the package name
+	// must come from scanning the resolved (build-arg-dependent) source dir.
+	dockerfilePath := writeTestDockerfile(t, base, `FROM ubuntu
+LABEL com.redhat.fbc.openshift.version=["5.0"]
+ARG INPUT_DIR
+COPY ./${INPUT_DIR}/ /configs
+`)
+
+	buildArgs := map[string]string{"INPUT_DIR": "catalog/v5.0"}
+	packages, err := GetPackages(dockerfilePath, base, buildArgs)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(packages) != 1 || packages[0] != "my-operator" {
+		t.Errorf("got %v, want [my-operator]", packages)
+	}
+
+	// Without the build-arg, INPUT_DIR resolves to empty and the scan falls
+	// back to the build context root, picking up the wrong directory name.
+	wrongPackages, err := GetPackages(dockerfilePath, base, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(wrongPackages) == 1 && wrongPackages[0] == "my-operator" {
+		t.Error("expected wrong/stale package name when INPUT_DIR build-arg is not provided, got the correct one")
 	}
 }
 
@@ -119,7 +154,7 @@ LABEL com.redhat.fbc.openshift.version=["5.0"]
 COPY ./catalog /configs/my-operator
 `)
 
-	packages, err := GetPackages(dockerfilePath, base)
+	packages, err := GetPackages(dockerfilePath, base, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

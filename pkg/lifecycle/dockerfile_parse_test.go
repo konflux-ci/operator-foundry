@@ -50,7 +50,7 @@ func mustParseDockerfile(t *testing.T, src string) *dockerfile.Dockerfile {
 // ── ParseCopyInstructionsForConfigs ───────────────────────────────────────────
 
 func TestParseCopyInstructionsForConfigs_NilDockerfile(t *testing.T) {
-	_, err := ParseCopyInstructionsForConfigs(nil)
+	_, err := ParseCopyInstructionsForConfigs(nil, nil)
 	if err == nil {
 		t.Fatal("expected error for nil Dockerfile, got nil")
 	}
@@ -61,7 +61,7 @@ func TestParseCopyInstructionsForConfigs_SingleADD(t *testing.T) {
 FROM ubuntu
 ADD catalog /configs
 `)
-	entries, err := ParseCopyInstructionsForConfigs(d)
+	entries, err := ParseCopyInstructionsForConfigs(d, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -75,7 +75,7 @@ func TestParseCopyInstructionsForConfigs_SingleCOPY(t *testing.T) {
 FROM ubuntu
 COPY ./catalog /configs/package-a
 `)
-	entries, err := ParseCopyInstructionsForConfigs(d)
+	entries, err := ParseCopyInstructionsForConfigs(d, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -89,7 +89,7 @@ func TestParseCopyInstructionsForConfigs_MultipleSources(t *testing.T) {
 FROM ubuntu
 COPY catalog.yaml channel.yaml /configs/my-operator/
 `)
-	entries, err := ParseCopyInstructionsForConfigs(d)
+	entries, err := ParseCopyInstructionsForConfigs(d, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -110,7 +110,7 @@ FROM ubuntu
 COPY ./catalog-package-a /configs/package-a
 COPY ./catalog-package-b /configs/package-b
 `)
-	entries, err := ParseCopyInstructionsForConfigs(d)
+	entries, err := ParseCopyInstructionsForConfigs(d, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -128,7 +128,7 @@ RUN make catalog
 FROM ubuntu
 COPY --from=builder /opt/app-root/src/catalog /configs/netobserv-operator
 `)
-	entries, err := ParseCopyInstructionsForConfigs(d)
+	entries, err := ParseCopyInstructionsForConfigs(d, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -156,7 +156,7 @@ FROM ubuntu
 ARG BUILDER=builder-v1
 COPY --from=$BUILDER /opt/catalog /configs/my-operator
 `)
-	entries, err := ParseCopyInstructionsForConfigs(d)
+	entries, err := ParseCopyInstructionsForConfigs(d, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -171,7 +171,7 @@ FROM ubuntu
 ENV PACKAGE_NAME=lifecycle-agent
 COPY .konflux/catalog/$PACKAGE_NAME /configs/$PACKAGE_NAME
 `)
-	entries, err := ParseCopyInstructionsForConfigs(d)
+	entries, err := ParseCopyInstructionsForConfigs(d, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -189,7 +189,7 @@ FROM ubuntu
 ARG PACKAGE_NAME=lifecycle-agent
 COPY .konflux/catalog/$PACKAGE_NAME /configs/$PACKAGE_NAME
 `)
-	entries, err := ParseCopyInstructionsForConfigs(d)
+	entries, err := ParseCopyInstructionsForConfigs(d, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -209,7 +209,7 @@ FROM ubuntu
 ARG PACKAGE_NAME
 COPY .konflux/catalog/$PACKAGE_NAME /configs/$PACKAGE_NAME
 `)
-	entries, err := ParseCopyInstructionsForConfigs(d)
+	entries, err := ParseCopyInstructionsForConfigs(d, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -232,7 +232,7 @@ FROM ubuntu AS stage-b
 ENV PACKAGE_NAME=operator-b
 COPY catalog /configs/$PACKAGE_NAME
 `)
-	entries, err := ParseCopyInstructionsForConfigs(d)
+	entries, err := ParseCopyInstructionsForConfigs(d, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -252,7 +252,7 @@ func TestParseCopyInstructionsForConfigs_UnresolvedVariable_ResolvesToEmpty(t *t
 FROM ubuntu
 COPY .konflux/catalog/$UNKNOWN_VAR /configs/$UNKNOWN_VAR
 `)
-	entries, err := ParseCopyInstructionsForConfigs(d)
+	entries, err := ParseCopyInstructionsForConfigs(d, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -269,7 +269,7 @@ func TestParseCopyInstructionsForConfigs_FalsePositivePrevented(t *testing.T) {
 FROM ubuntu
 COPY backup /configs-backup
 `)
-	_, err := ParseCopyInstructionsForConfigs(d)
+	_, err := ParseCopyInstructionsForConfigs(d, nil)
 	if err == nil {
 		t.Fatal("expected error — /configs-backup should not match /configs")
 	}
@@ -281,7 +281,7 @@ FROM ubuntu
 ADD catalog /configs
 COPY ./catalog-package-b /configs/package-b
 `)
-	entries, err := ParseCopyInstructionsForConfigs(d)
+	entries, err := ParseCopyInstructionsForConfigs(d, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -295,7 +295,7 @@ func TestParseCopyInstructionsForConfigs_NoConfigsTarget(t *testing.T) {
 FROM ubuntu
 ADD catalog /other
 `)
-	_, err := ParseCopyInstructionsForConfigs(d)
+	_, err := ParseCopyInstructionsForConfigs(d, nil)
 	if err == nil {
 		t.Fatal("expected error when no ADD/COPY targets /configs, got nil")
 	}
@@ -305,7 +305,7 @@ func TestParseCopyInstructionsForConfigs_EmptyCommands(t *testing.T) {
 	d := mustParseDockerfile(t, `
 FROM ubuntu
 `)
-	_, err := ParseCopyInstructionsForConfigs(d)
+	_, err := ParseCopyInstructionsForConfigs(d, nil)
 	if err == nil {
 		t.Fatal("expected error for Dockerfile with no COPY/ADD, got nil")
 	}
@@ -316,7 +316,7 @@ func TestParseCopyInstructionsForConfigs_WildcardSourcePath_ReturnsError(t *test
 FROM ubuntu
 COPY catalog/* /configs/my-operator/
 `)
-	_, err := ParseCopyInstructionsForConfigs(d)
+	_, err := ParseCopyInstructionsForConfigs(d, nil)
 	if err == nil {
 		t.Fatal("expected error for wildcard source path, got nil")
 	}
@@ -329,7 +329,7 @@ FROM ubuntu
 COPY .konflux/catalog/$PACKAGE_NAME /configs/$PACKAGE_NAME
 ENV PACKAGE_NAME=lifecycle-agent
 `)
-	entries, err := ParseCopyInstructionsForConfigs(d)
+	entries, err := ParseCopyInstructionsForConfigs(d, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -349,7 +349,7 @@ ENV PACKAGE_NAME=env-value
 ARG PACKAGE_NAME=arg-value
 COPY .konflux/catalog/$PACKAGE_NAME /configs/$PACKAGE_NAME
 `)
-	entries, err := ParseCopyInstructionsForConfigs(d)
+	entries, err := ParseCopyInstructionsForConfigs(d, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -358,6 +358,57 @@ COPY .konflux/catalog/$PACKAGE_NAME /configs/$PACKAGE_NAME
 	}
 	if entries[0].Dest != "/configs/env-value" {
 		t.Errorf("Dest = %q, want /configs/env-value — ENV should take precedence over ARG", entries[0].Dest)
+	}
+}
+
+func TestParseCopyInstructionsForConfigs_BuildArgResolvesStageScopedARGWithoutDefault(t *testing.T) {
+	// ARG declared inside the stage, no default — unresolvable without --build-arg.
+	d := mustParseDockerfile(t, `
+ARG OPM_IMAGE=quay.io/operator-framework/opm:latest
+FROM ${OPM_IMAGE} as builder
+ARG INPUT_DIR
+COPY ./${INPUT_DIR}/ /configs/gatekeeper-operator-product
+`)
+	entries, err := ParseCopyInstructionsForConfigs(d, map[string]string{"INPUT_DIR": "catalog/v5.0"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if entries[0].Srcs[0] != "./catalog/v5.0/" {
+		t.Errorf("Src = %q, want ./catalog/v5.0/", entries[0].Srcs[0])
+	}
+	if entries[0].Dest != "/configs/gatekeeper-operator-product" {
+		t.Errorf("Dest = %q, want /configs/gatekeeper-operator-product", entries[0].Dest)
+	}
+}
+
+func TestParseCopyInstructionsForConfigs_BuildArgOverridesDockerfileDefault(t *testing.T) {
+	d := mustParseDockerfile(t, `
+FROM ubuntu
+ARG PACKAGE_NAME=lifecycle-agent
+COPY .konflux/catalog/$PACKAGE_NAME /configs/$PACKAGE_NAME
+`)
+	entries, err := ParseCopyInstructionsForConfigs(d, map[string]string{"PACKAGE_NAME": "overridden-agent"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if entries[0].Srcs[0] != ".konflux/catalog/overridden-agent" {
+		t.Errorf("Src = %q, want .konflux/catalog/overridden-agent — buildArgs should override the Dockerfile default", entries[0].Srcs[0])
+	}
+}
+
+func TestParseCopyInstructionsForConfigs_NilBuildArgs_UnresolvedVariableStillEmpty(t *testing.T) {
+	// Passing nil buildArgs must behave exactly like before this parameter existed.
+	d := mustParseDockerfile(t, `
+FROM ubuntu
+ARG INPUT_DIR
+COPY ./${INPUT_DIR}/ /configs/my-operator
+`)
+	entries, err := ParseCopyInstructionsForConfigs(d, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if entries[0].Srcs[0] != ".//" {
+		t.Errorf("Src = %q, want .// — unresolved ARG with no buildArgs should expand to empty", entries[0].Srcs[0])
 	}
 }
 

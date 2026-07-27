@@ -39,7 +39,10 @@ var ocpVersionRegex = regexp.MustCompile(`^[4-9]\.(0|[1-9][0-9]*)$`)
 // GetOCPVersionsFromDockerfile returns the OCP versions targeted by the FBC fragment.
 // It first tries to read the com.redhat.fbc.openshift.version label,
 // then falls back to extracting the version from the base image tag.
-func GetOCPVersionsFromDockerfile(d *dockerfile.Dockerfile) ([]string, error) {
+// buildArgs resolves any ARG references (e.g. FROM image:${CATALOG_VERSION})
+// in the base image tag; a Dockerfile ARG's own default value is used for
+// any key not present in buildArgs.
+func GetOCPVersionsFromDockerfile(d *dockerfile.Dockerfile, buildArgs map[string]string) ([]string, error) {
 	if d == nil {
 		return nil, fmt.Errorf("dockerfile is nil")
 	}
@@ -50,7 +53,7 @@ func GetOCPVersionsFromDockerfile(d *dockerfile.Dockerfile) ([]string, error) {
 	}
 	if len(versions) == 0 {
 		slog.Info("com.redhat.fbc.openshift.version label not found, falling back to base image tag")
-		version, err := getOCPVersionFromDockerfileBaseImage(d)
+		version, err := getOCPVersionFromDockerfileBaseImage(d, buildArgs)
 		if err != nil {
 			return nil, fmt.Errorf("failed to determine OCP version: %w", err)
 		}
@@ -98,10 +101,23 @@ func getOCPVersionsFromDockerfileLabel(d *dockerfile.Dockerfile) ([]string, erro
 // getOCPVersionFromDockerfileBaseImage extracts the OCP version from the base image tag
 // in the final Dockerfile stage, as a fallback when the label is absent.
 // e.g. FROM registry.redhat.io/openshift4/ose-operator-registry-rhel9:v4.15 → "v4.15"
-func getOCPVersionFromDockerfileBaseImage(d *dockerfile.Dockerfile) (string, error) {
+//
+// The base image reference may contain an ARG reference (e.g.
+// FROM ...:${CATALOG_VERSION}), commonly used so the same Dockerfile can be
+// built against different OCP base images via --build-arg. Such references
+// are resolved using buildArgs first, falling back to the ARG's own default
+// value declared in the Dockerfile.
+func getOCPVersionFromDockerfileBaseImage(d *dockerfile.Dockerfile, buildArgs map[string]string) (string, error) {
 	if len(d.Stages) == 0 {
 		return "", fmt.Errorf("no stages found in Dockerfile")
 	}
+
+	d.Expand(func(key string) (string, error) {
+		if value, ok := buildArgs[key]; ok {
+			return value, nil
+		}
+		return "", fmt.Errorf("build arg %q not provided", key)
+	})
 
 	lastStage := d.Stages[len(d.Stages)-1]
 	baseImage := lastStage.BaseName
@@ -113,7 +129,7 @@ func getOCPVersionFromDockerfileBaseImage(d *dockerfile.Dockerfile) (string, err
 
 	ref, err := reference.ParseNormalizedNamed(baseImage)
 	if err != nil {
-		return "", fmt.Errorf("could not parse base image reference %q: %w", baseImage, err)
+		return "", fmt.Errorf("could not parse base image reference %q: %w (if the tag references a build ARG without a usable default, pass its value with --build-arg, or add the com.redhat.fbc.openshift.version label instead)", baseImage, err)
 	}
 
 	if _, ok := ref.(reference.Tagged); !ok {

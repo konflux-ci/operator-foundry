@@ -30,13 +30,17 @@ const lifecycleMinOCPVersion = "5.0"
 // targeted OCP versions are >= lifecycleMinOCPVersion, i.e. whether the FBC
 // is eligible for lifecycle injection.
 //
+// buildArgs resolves any ARG references used in the base image tag (e.g.
+// FROM ...:${CATALOG_VERSION}) and should match the build-args the image is
+// actually built with. It may be nil.
+//
 // Returns (false, err) if the Dockerfile cannot be parsed, if OCP versions
 // cannot be determined from the Dockerfile (e.g. malformed or missing
 // version label), or if version comparison fails (e.g. invalid version
 // format). Returns (false, nil) if the Dockerfile parses successfully but
 // at least one targeted OCP version is below lifecycleMinOCPVersion.
 // Returns (true, nil) if all targeted OCP versions are >= lifecycleMinOCPVersion.
-func CheckLifecycleEligibility(dockerfilePath, buildContextPath string) (bool, error) {
+func CheckLifecycleEligibility(dockerfilePath, buildContextPath string, buildArgs map[string]string) (bool, error) {
 	resolvedPath, err := resolveDockerfilePath(dockerfilePath, buildContextPath)
 	if err != nil {
 		return false, err
@@ -47,7 +51,7 @@ func CheckLifecycleEligibility(dockerfilePath, buildContextPath string) (bool, e
 		return false, fmt.Errorf("failed to parse dockerfile %q: %w", resolvedPath, err)
 	}
 
-	ocpVersions, err := ocp.GetOCPVersionsFromDockerfile(d)
+	ocpVersions, err := ocp.GetOCPVersionsFromDockerfile(d, buildArgs)
 	if err != nil {
 		return false, fmt.Errorf("failed to get OCP versions: %w", err)
 	}

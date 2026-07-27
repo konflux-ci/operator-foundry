@@ -24,7 +24,10 @@ import (
 
 // GetPackages parses the Dockerfile and extracts OLM package names from its
 // COPY instructions.
-func GetPackages(dockerfilePath, buildContextPath string) ([]string, error) {
+//
+// buildArgs resolves any ARG references used in COPY/ADD source paths and
+// should match the build-args the image is actually built with. It may be nil.
+func GetPackages(dockerfilePath, buildContextPath string, buildArgs map[string]string) ([]string, error) {
 	resolvedPath, err := resolveDockerfilePath(dockerfilePath, buildContextPath)
 	if err != nil {
 		return nil, err
@@ -35,7 +38,7 @@ func GetPackages(dockerfilePath, buildContextPath string) ([]string, error) {
 		return nil, fmt.Errorf("failed to parse dockerfile %q: %w", resolvedPath, err)
 	}
 
-	entries, err := ParseCopyInstructionsForConfigs(d)
+	entries, err := ParseCopyInstructionsForConfigs(d, buildArgs)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse COPY instructions: %w", err)
 	}
