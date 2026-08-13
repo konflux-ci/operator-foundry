@@ -25,5 +25,5 @@ require (
 	github.com/spf13/pflag v1.0.9 // indirect
 	github.com/tonistiigi/go-csvvalue v0.0.0-20240814133006-030d3b2625d0 // indirect
 	go.podman.io/storage v1.63.0 // indirect
-	google.golang.org/protobuf v1.36.11 // indirect
+	google.golang.org/protobuf v1.36.12 // indirect
 )
