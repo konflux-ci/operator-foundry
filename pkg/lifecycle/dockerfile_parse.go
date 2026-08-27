@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/keilerkonzept/dockerfile-json/pkg/dockerfile"
@@ -148,6 +149,150 @@ func updateEnvState(command interface{}, envMap map[string]string, envKeys map[s
 			}
 		}
 	}
+}
+
+// ResolveBuilderStageEntries attempts to resolve COPY --from=<stage> entries back
+// to their build-context source paths by tracing through the named build stage's
+// own COPY instructions. Entries that cannot be resolved remain unchanged
+// (IsFromBuildStage() still returns true for them).
+//
+// Limitation: RUN commands in the builder stage that rename or move paths cannot
+// be accounted for — the trace assumes build-context paths survive into the stage
+// verbatim. If a RUN renames the catalog directory itself, the resolved path will
+// not exist on disk and injection will fail with a clear "directory not found" error.
+func ResolveBuilderStageEntries(d *dockerfile.Dockerfile, entries []DockerfileCopyEntry, buildArgs map[string]string) []DockerfileCopyEntry {
+	result := make([]DockerfileCopyEntry, 0, len(entries))
+	for _, entry := range entries {
+		if !entry.IsFromBuildStage() {
+			result = append(result, entry)
+			continue
+		}
+		if resolved := tryResolveBuildStageEntry(d, entry, buildArgs); resolved != nil {
+			slog.Info("resolved build stage entry to build context", "from", entry.From, "srcs", resolved.Srcs)
+			result = append(result, *resolved)
+		} else {
+			result = append(result, entry)
+		}
+	}
+	return result
+}
+
+// tryResolveBuildStageEntry traces a single COPY --from=<stage> entry back to a
+// build-context DockerfileCopyEntry. Returns nil if the named stage is not found,
+// itself copies its catalog path from another stage, or the source path cannot be
+// mapped back to any build-context COPY instruction.
+func tryResolveBuildStageEntry(d *dockerfile.Dockerfile, entry DockerfileCopyEntry, buildArgs map[string]string) *DockerfileCopyEntry {
+	var targetStage *dockerfile.Stage
+	for _, stage := range d.Stages {
+		if stage.Stage.Name == entry.From {
+			targetStage = stage
+			break
+		}
+	}
+	if targetStage == nil {
+		return nil
+	}
+
+	stageCopies := buildContextCopiesFromStage(targetStage, d, buildArgs)
+
+	resolvedSrcs := make([]string, 0, len(entry.Srcs))
+	for _, src := range entry.Srcs {
+		ctxPath := mapStagePathToBuildContext(src, stageCopies)
+		if ctxPath == "" {
+			return nil
+		}
+		resolvedSrcs = append(resolvedSrcs, ctxPath)
+	}
+
+	return &DockerfileCopyEntry{
+		Srcs: resolvedSrcs,
+		Dest: entry.Dest,
+		From: "",
+	}
+}
+
+// buildContextCopiesFromStage collects all COPY/ADD instructions in the given stage
+// that source from the build context (no --from flag), with variables resolved.
+func buildContextCopiesFromStage(stage *dockerfile.Stage, d *dockerfile.Dockerfile, buildArgs map[string]string) []DockerfileCopyEntry {
+	globalArgs := buildGlobalArgMap(d)
+	envMap := make(map[string]string)
+	envKeys := make(map[string]bool)
+
+	expand := func(key string) string {
+		if val, ok := envMap[key]; ok {
+			return val
+		}
+		return ""
+	}
+
+	var copies []DockerfileCopyEntry
+	for _, cmd := range stage.Commands {
+		updateEnvState(cmd.Command, envMap, envKeys, globalArgs, buildArgs)
+
+		var srcs []string
+		var dest, from string
+		switch c := cmd.Command.(type) {
+		case *instructions.AddCommand:
+			if len(c.SourcePaths) == 0 {
+				continue
+			}
+			srcs, dest = c.SourcePaths, c.DestPath
+		case *instructions.CopyCommand:
+			if len(c.SourcePaths) == 0 {
+				continue
+			}
+			srcs, dest, from = c.SourcePaths, c.DestPath, c.From
+		default:
+			continue
+		}
+
+		if os.Expand(from, expand) != "" {
+			continue // nested --from= inside the builder stage; skip, can't trace further
+		}
+
+		resolvedSrcs := make([]string, len(srcs))
+		for i, s := range srcs {
+			resolvedSrcs[i] = os.Expand(s, expand)
+		}
+		copies = append(copies, DockerfileCopyEntry{
+			Srcs: resolvedSrcs,
+			Dest: os.Expand(dest, expand),
+		})
+	}
+	return copies
+}
+
+// mapStagePathToBuildContext maps a path inside a build stage back to its
+// corresponding build-context path using the stage's COPY instruction set.
+// Returns "" if no COPY entry covers the path or the match is ambiguous
+// (multiple sources and the path is a sub-path of the destination).
+//
+// Example: stage has COPY .konflux/catalog/ /app/.konflux/catalog/
+// and stagePath is /app/.konflux/catalog/my-operator →
+// returns .konflux/catalog/my-operator
+func mapStagePathToBuildContext(stagePath string, stageCopies []DockerfileCopyEntry) string {
+	stagePath = filepath.Clean(stagePath)
+
+	for _, c := range stageCopies {
+		dest := filepath.Clean(c.Dest)
+		rel, err := filepath.Rel(dest, stagePath)
+		if err != nil || strings.HasPrefix(rel, "..") {
+			continue
+		}
+		if len(c.Srcs) != 1 {
+			// Multiple sources: can't determine which src owns a sub-path.
+			if rel == "." {
+				return "" // ambiguous
+			}
+			continue
+		}
+		src := filepath.Clean(c.Srcs[0])
+		if rel == "." {
+			return src
+		}
+		return filepath.Join(src, rel)
+	}
+	return ""
 }
 
 // createConfigsEntry expands variables and validates the COPY/ADD instruction.

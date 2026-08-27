@@ -367,3 +367,79 @@ COPY catalog /configs
 		t.Fatalf("unexpected error for duplicate package names: %v", err)
 	}
 }
+
+func TestInjectLifecycle_BuilderStagePattern_TracedToContext(t *testing.T) {
+	// Simulates the TALM Dockerfile pattern: the catalog is copied into a builder
+	// stage that transforms it with a RUN command, and the final stage copies from
+	// the builder. The inject step must trace the --from=builder COPY back to the
+	// build-context source and write lifecycle.json there.
+	base := t.TempDir()
+	lifecycleDir := t.TempDir()
+	lifecycleData := []byte(`{"schema":"io.openshift.operators.lifecycles.v1alpha1"}`)
+
+	pkgDir := filepath.Join(base, ".konflux", "catalog", "topology-aware-lifecycle-manager")
+	if err := os.MkdirAll(pkgDir, 0755); err != nil {
+		t.Fatalf("failed to create package dir: %v", err)
+	}
+
+	pkgLifecycleDir := filepath.Join(lifecycleDir, "topology-aware-lifecycle-manager")
+	if err := os.MkdirAll(pkgLifecycleDir, 0755); err != nil {
+		t.Fatalf("failed to create lifecycle pkg dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(pkgLifecycleDir, "lifecycle.json"), lifecycleData, 0644); err != nil {
+		t.Fatalf("failed to write lifecycle file: %v", err)
+	}
+
+	dockerfilePath := writeTestDockerfile(t, base, `ARG BUILDER_IMAGE=golang:1.21
+FROM ${BUILDER_IMAGE} AS builder
+COPY .konflux/catalog/ /app/.konflux/catalog/
+RUN make fix-catalog-name
+
+FROM ubuntu
+ENV PACKAGE_NAME=topology-aware-lifecycle-manager
+COPY --from=builder /app/.konflux/catalog/${PACKAGE_NAME}/ /configs/${PACKAGE_NAME}
+`)
+
+	if err := InjectLifecycle(dockerfilePath, base, lifecycleDir, "topology-aware-lifecycle-manager", nil); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	got, err := os.ReadFile(filepath.Join(pkgDir, "lifecycle.json"))
+	if err != nil {
+		t.Fatalf("lifecycle.json not injected into build context: %v", err)
+	}
+	if string(got) != string(lifecycleData) {
+		t.Errorf("content mismatch\ngot: %s\nwant: %s", got, lifecycleData)
+	}
+}
+
+func TestInjectLifecycle_BuilderStagePattern_UnresolvableStillFails(t *testing.T) {
+	// When the builder stage itself copies from another stage (nested --from=),
+	// the trace cannot reach the build context and injection must still fail.
+	base := t.TempDir()
+	lifecycleDir := t.TempDir()
+	lifecycleData := []byte(`{"schema":"io.openshift.operators.lifecycles.v1alpha1"}`)
+
+	pkgLifecycleDir := filepath.Join(lifecycleDir, "my-operator")
+	if err := os.MkdirAll(pkgLifecycleDir, 0755); err != nil {
+		t.Fatalf("failed to create lifecycle pkg dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(pkgLifecycleDir, "lifecycle.json"), lifecycleData, 0644); err != nil {
+		t.Fatalf("failed to write lifecycle file: %v", err)
+	}
+
+	dockerfilePath := writeTestDockerfile(t, base, `FROM ubuntu AS base
+COPY catalog/ /app/catalog/
+
+FROM base AS builder
+COPY --from=base /app/catalog/ /app/.konflux/catalog/
+
+FROM ubuntu
+COPY --from=builder /app/.konflux/catalog/my-operator/ /configs/my-operator
+`)
+
+	err := InjectLifecycle(dockerfilePath, base, lifecycleDir, "my-operator", nil)
+	if err == nil {
+		t.Fatal("expected error for unresolvable builder chain, got nil")
+	}
+}

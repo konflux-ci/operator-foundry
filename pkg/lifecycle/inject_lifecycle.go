@@ -54,6 +54,8 @@ func InjectLifecycle(dockerfilePath, buildContextPath, lifecycleDir, packages st
 		return fmt.Errorf("failed to parse COPY instructions: %w", err)
 	}
 
+	entries = ResolveBuilderStageEntries(d, entries, buildArgs)
+
 	if strings.Trim(packages, " ,") == "" {
 		return fmt.Errorf("packages list must contain at least one valid package name")
 	}

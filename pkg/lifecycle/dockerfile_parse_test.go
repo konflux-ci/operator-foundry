@@ -412,6 +412,177 @@ COPY ./${INPUT_DIR}/ /configs/my-operator
 	}
 }
 
+// ── ResolveBuilderStageEntries ────────────────────────────────────────────────
+
+func TestResolveBuilderStageEntries_SimplePathPrefix(t *testing.T) {
+	// The TALM pattern: builder copies catalog root from build context;
+	// final stage copies a package sub-directory from the builder.
+	d := mustParseDockerfile(t, `
+FROM ubuntu AS builder
+COPY .konflux/catalog/ /app/.konflux/catalog/
+RUN make fix-catalog-name
+
+FROM ubuntu
+ENV PACKAGE_NAME=topology-aware-lifecycle-manager
+COPY --from=builder /app/.konflux/catalog/${PACKAGE_NAME}/ /configs/${PACKAGE_NAME}
+`)
+	entries, err := ParseCopyInstructionsForConfigs(d, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(entries) != 1 || !entries[0].IsFromBuildStage() {
+		t.Fatal("expected a single build stage entry before resolution")
+	}
+
+	resolved := ResolveBuilderStageEntries(d, entries, nil)
+	if len(resolved) != 1 {
+		t.Fatalf("got %d entries, want 1", len(resolved))
+	}
+	if resolved[0].IsFromBuildStage() {
+		t.Error("expected entry to be resolved to build context")
+	}
+	if resolved[0].Srcs[0] != ".konflux/catalog/topology-aware-lifecycle-manager" {
+		t.Errorf("Srcs[0] = %q, want .konflux/catalog/topology-aware-lifecycle-manager", resolved[0].Srcs[0])
+	}
+	if resolved[0].Dest != "/configs/topology-aware-lifecycle-manager" {
+		t.Errorf("Dest = %q, want /configs/topology-aware-lifecycle-manager", resolved[0].Dest)
+	}
+}
+
+func TestResolveBuilderStageEntries_ENVInBuilderStageResolved(t *testing.T) {
+	d := mustParseDockerfile(t, `
+FROM ubuntu AS builder
+ENV CATALOG_DIR=.konflux/catalog
+COPY ${CATALOG_DIR}/ /app/catalog/
+
+FROM ubuntu
+COPY --from=builder /app/catalog/my-operator/ /configs/my-operator
+`)
+	entries, err := ParseCopyInstructionsForConfigs(d, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	resolved := ResolveBuilderStageEntries(d, entries, nil)
+	if resolved[0].IsFromBuildStage() {
+		t.Error("expected entry to be resolved")
+	}
+	if resolved[0].Srcs[0] != ".konflux/catalog/my-operator" {
+		t.Errorf("Srcs[0] = %q, want .konflux/catalog/my-operator", resolved[0].Srcs[0])
+	}
+}
+
+func TestResolveBuilderStageEntries_ExactDestMatch(t *testing.T) {
+	// Builder copies the exact package directory (not a parent); final stage
+	// copies the whole builder dest — rel == "." case.
+	d := mustParseDockerfile(t, `
+FROM ubuntu AS builder
+COPY .konflux/catalog/my-operator/ /app/catalog/my-operator/
+
+FROM ubuntu
+COPY --from=builder /app/catalog/my-operator/ /configs/my-operator
+`)
+	entries, err := ParseCopyInstructionsForConfigs(d, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	resolved := ResolveBuilderStageEntries(d, entries, nil)
+	if resolved[0].IsFromBuildStage() {
+		t.Error("expected entry to be resolved")
+	}
+	if resolved[0].Srcs[0] != ".konflux/catalog/my-operator" {
+		t.Errorf("Srcs[0] = %q, want .konflux/catalog/my-operator", resolved[0].Srcs[0])
+	}
+}
+
+func TestResolveBuilderStageEntries_UnresolvableStageUnchanged(t *testing.T) {
+	// Builder itself copies from another stage — can't trace to build context.
+	d := mustParseDockerfile(t, `
+FROM ubuntu AS base
+COPY catalog /app/catalog
+
+FROM base AS builder
+COPY --from=base /app/catalog /app/.konflux/catalog/
+
+FROM ubuntu
+COPY --from=builder /app/.konflux/catalog/my-operator/ /configs/my-operator
+`)
+	entries, err := ParseCopyInstructionsForConfigs(d, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	resolved := ResolveBuilderStageEntries(d, entries, nil)
+	if !resolved[0].IsFromBuildStage() {
+		t.Error("expected entry to remain unresolved (builder stage itself uses --from=)")
+	}
+	if resolved[0].From != "builder" {
+		t.Errorf("From = %q, want builder", resolved[0].From)
+	}
+}
+
+func TestResolveBuilderStageEntries_UnknownStageUnchanged(t *testing.T) {
+	// --from= references a stage name that doesn't exist in the Dockerfile.
+	d := mustParseDockerfile(t, `
+FROM ubuntu
+COPY --from=nonexistent /app/catalog/my-operator/ /configs/my-operator
+`)
+	entries, err := ParseCopyInstructionsForConfigs(d, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	resolved := ResolveBuilderStageEntries(d, entries, nil)
+	if !resolved[0].IsFromBuildStage() {
+		t.Error("expected entry to remain unresolved (unknown stage)")
+	}
+}
+
+func TestResolveBuilderStageEntries_NoMatchingCopyInBuilder(t *testing.T) {
+	// Builder stage has no COPY that covers the path in the --from= source.
+	d := mustParseDockerfile(t, `
+FROM ubuntu AS builder
+COPY other-dir/ /app/other/
+
+FROM ubuntu
+COPY --from=builder /app/.konflux/catalog/my-operator/ /configs/my-operator
+`)
+	entries, err := ParseCopyInstructionsForConfigs(d, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	resolved := ResolveBuilderStageEntries(d, entries, nil)
+	if !resolved[0].IsFromBuildStage() {
+		t.Error("expected entry to remain unresolved (no matching COPY in builder)")
+	}
+}
+
+func TestResolveBuilderStageEntries_PassThroughNonBuilderEntries(t *testing.T) {
+	// Non-build-stage entries are passed through unchanged.
+	d := mustParseDockerfile(t, `
+FROM ubuntu
+COPY .konflux/catalog/my-operator/ /configs/my-operator
+`)
+	entries, err := ParseCopyInstructionsForConfigs(d, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	resolved := ResolveBuilderStageEntries(d, entries, nil)
+	if len(resolved) != 1 {
+		t.Fatalf("got %d entries, want 1", len(resolved))
+	}
+	if resolved[0].IsFromBuildStage() {
+		t.Error("expected non-build-stage entry to remain unchanged")
+	}
+	// trailing slash is preserved as-is from the Dockerfile source path
+	if resolved[0].Srcs[0] != ".konflux/catalog/my-operator/" {
+		t.Errorf("Srcs[0] = %q, want .konflux/catalog/my-operator/", resolved[0].Srcs[0])
+	}
+}
+
 // ── buildGlobalArgMap ─────────────────────────────────────────────────────────
 
 func TestBuildGlobalArgMap_WithDefault(t *testing.T) {
