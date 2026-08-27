@@ -21,6 +21,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/keilerkonzept/dockerfile-json/pkg/dockerfile"
@@ -177,18 +178,30 @@ func ResolveBuilderStageEntries(d *dockerfile.Dockerfile, entries []DockerfileCo
 	return result
 }
 
+// findStageByRef looks up a build stage by alias name or zero-based numeric index.
+// Returns nil if the ref is an out-of-range index or matches no stage alias.
+// External image references (e.g. --from=alpine) are not stage refs and return nil.
+func findStageByRef(d *dockerfile.Dockerfile, ref string) *dockerfile.Stage {
+	if idx, err := strconv.Atoi(ref); err == nil {
+		if idx >= 0 && idx < len(d.Stages) {
+			return d.Stages[idx]
+		}
+		return nil
+	}
+	for _, stage := range d.Stages {
+		if stage.Stage.Name == ref {
+			return stage
+		}
+	}
+	return nil
+}
+
 // tryResolveBuildStageEntry traces a single COPY --from=<stage> entry back to a
 // build-context DockerfileCopyEntry. Returns nil if the named stage is not found,
 // itself copies its catalog path from another stage, or the source path cannot be
 // mapped back to any build-context COPY instruction.
 func tryResolveBuildStageEntry(d *dockerfile.Dockerfile, entry DockerfileCopyEntry, buildArgs map[string]string) *DockerfileCopyEntry {
-	var targetStage *dockerfile.Stage
-	for _, stage := range d.Stages {
-		if stage.Stage.Name == entry.From {
-			targetStage = stage
-			break
-		}
-	}
+	targetStage := findStageByRef(d, entry.From)
 	if targetStage == nil {
 		return nil
 	}
@@ -212,11 +225,14 @@ func tryResolveBuildStageEntry(d *dockerfile.Dockerfile, entry DockerfileCopyEnt
 }
 
 // buildContextCopiesFromStage collects all COPY/ADD instructions in the given stage
-// that source from the build context (no --from flag), with variables resolved.
+// that source from the build context (no --from flag), with variables and WORKDIR resolved.
+// Relative COPY/ADD destinations are normalized against the effective WORKDIR at the
+// point of each instruction, matching Docker's own resolution rules.
 func buildContextCopiesFromStage(stage *dockerfile.Stage, d *dockerfile.Dockerfile, buildArgs map[string]string) []DockerfileCopyEntry {
 	globalArgs := buildGlobalArgMap(d)
 	envMap := make(map[string]string)
 	envKeys := make(map[string]bool)
+	workdir := "/"
 
 	expand := func(key string) string {
 		if val, ok := envMap[key]; ok {
@@ -232,6 +248,14 @@ func buildContextCopiesFromStage(stage *dockerfile.Stage, d *dockerfile.Dockerfi
 		var srcs []string
 		var dest, from string
 		switch c := cmd.Command.(type) {
+		case *instructions.WorkdirCommand:
+			resolved := os.Expand(c.Path, expand)
+			if filepath.IsAbs(resolved) {
+				workdir = resolved
+			} else {
+				workdir = filepath.Join(workdir, resolved)
+			}
+			continue
 		case *instructions.AddCommand:
 			if len(c.SourcePaths) == 0 {
 				continue
@@ -254,9 +278,13 @@ func buildContextCopiesFromStage(stage *dockerfile.Stage, d *dockerfile.Dockerfi
 		for i, s := range srcs {
 			resolvedSrcs[i] = os.Expand(s, expand)
 		}
+		resolvedDest := os.Expand(dest, expand)
+		if !filepath.IsAbs(resolvedDest) {
+			resolvedDest = filepath.Join(workdir, resolvedDest)
+		}
 		copies = append(copies, DockerfileCopyEntry{
 			Srcs: resolvedSrcs,
-			Dest: os.Expand(dest, expand),
+			Dest: resolvedDest,
 		})
 	}
 	return copies
@@ -264,14 +292,19 @@ func buildContextCopiesFromStage(stage *dockerfile.Stage, d *dockerfile.Dockerfi
 
 // mapStagePathToBuildContext maps a path inside a build stage back to its
 // corresponding build-context path using the stage's COPY instruction set.
-// Returns "" if no COPY entry covers the path or the match is ambiguous
-// (multiple sources and the path is a sub-path of the destination).
+// Returns "" if no COPY entry covers the path or the final covering COPY has
+// ambiguous provenance (multiple sources).
+//
+// COPYs are evaluated in forward order and the last one covering stagePath wins,
+// matching Docker's layer application order. A covering COPY with multiple sources
+// clears any previously resolved result because provenance is ambiguous.
 //
 // Example: stage has COPY .konflux/catalog/ /app/.konflux/catalog/
 // and stagePath is /app/.konflux/catalog/my-operator →
 // returns .konflux/catalog/my-operator
 func mapStagePathToBuildContext(stagePath string, stageCopies []DockerfileCopyEntry) string {
 	stagePath = filepath.Clean(stagePath)
+	result := ""
 
 	for _, c := range stageCopies {
 		dest := filepath.Clean(c.Dest)
@@ -279,20 +312,21 @@ func mapStagePathToBuildContext(stagePath string, stageCopies []DockerfileCopyEn
 		if err != nil || strings.HasPrefix(rel, "..") {
 			continue
 		}
+		// This COPY covers stagePath; determine whether provenance is traceable.
 		if len(c.Srcs) != 1 {
-			// Multiple sources: can't determine which src owns a sub-path.
-			if rel == "." {
-				return "" // ambiguous
-			}
+			// Multiple sources: can't determine which src owns this path.
+			// Clear any previously resolved result — the last write wins and it's ambiguous.
+			result = ""
 			continue
 		}
 		src := filepath.Clean(c.Srcs[0])
 		if rel == "." {
-			return src
+			result = src
+		} else {
+			result = filepath.Join(src, rel)
 		}
-		return filepath.Join(src, rel)
 	}
-	return ""
+	return result
 }
 
 // createConfigsEntry expands variables and validates the COPY/ADD instruction.

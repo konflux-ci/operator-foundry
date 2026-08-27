@@ -583,6 +583,140 @@ COPY .konflux/catalog/my-operator/ /configs/my-operator
 	}
 }
 
+func TestResolveBuilderStageEntries_LaterCopyTakesPrecedence(t *testing.T) {
+	// Docker applies layers in order; the last COPY covering a path wins.
+	d := mustParseDockerfile(t, `
+FROM ubuntu AS builder
+COPY old-catalog/ /app/catalog/
+COPY .konflux/catalog/ /app/catalog/
+
+FROM ubuntu
+COPY --from=builder /app/catalog/my-operator/ /configs/my-operator
+`)
+	entries, err := ParseCopyInstructionsForConfigs(d, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	resolved := ResolveBuilderStageEntries(d, entries, nil)
+	if resolved[0].IsFromBuildStage() {
+		t.Error("expected entry to be resolved")
+	}
+	if resolved[0].Srcs[0] != ".konflux/catalog/my-operator" {
+		t.Errorf("Srcs[0] = %q, want .konflux/catalog/my-operator — later COPY must take precedence", resolved[0].Srcs[0])
+	}
+}
+
+func TestResolveBuilderStageEntries_LaterMultiSrcCopyClears(t *testing.T) {
+	// A multi-source COPY that overwrites a previously resolvable path makes
+	// provenance ambiguous; the result must be cleared conservatively.
+	d := mustParseDockerfile(t, `
+FROM ubuntu AS builder
+COPY .konflux/catalog/ /app/catalog/
+COPY other-a/ other-b/ /app/catalog/
+
+FROM ubuntu
+COPY --from=builder /app/catalog/my-operator/ /configs/my-operator
+`)
+	entries, err := ParseCopyInstructionsForConfigs(d, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	resolved := ResolveBuilderStageEntries(d, entries, nil)
+	if !resolved[0].IsFromBuildStage() {
+		t.Error("expected entry to remain unresolved — multi-src COPY clears provenance")
+	}
+}
+
+func TestResolveBuilderStageEntries_WorkdirAbsoluteNormalizesRelativeDest(t *testing.T) {
+	// WORKDIR /app makes the relative dest "catalog/" resolve to /app/catalog/.
+	d := mustParseDockerfile(t, `
+FROM ubuntu AS builder
+WORKDIR /app
+COPY .konflux/catalog/ catalog/
+
+FROM ubuntu
+COPY --from=builder /app/catalog/my-operator/ /configs/my-operator
+`)
+	entries, err := ParseCopyInstructionsForConfigs(d, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	resolved := ResolveBuilderStageEntries(d, entries, nil)
+	if resolved[0].IsFromBuildStage() {
+		t.Error("expected entry to be resolved")
+	}
+	if resolved[0].Srcs[0] != ".konflux/catalog/my-operator" {
+		t.Errorf("Srcs[0] = %q, want .konflux/catalog/my-operator", resolved[0].Srcs[0])
+	}
+}
+
+func TestResolveBuilderStageEntries_WorkdirRelativeComposed(t *testing.T) {
+	// Successive relative WORKDIR instructions accumulate: /app then src → /app/src.
+	d := mustParseDockerfile(t, `
+FROM ubuntu AS builder
+WORKDIR /app
+WORKDIR src
+COPY .konflux/catalog/ catalog/
+
+FROM ubuntu
+COPY --from=builder /app/src/catalog/my-operator/ /configs/my-operator
+`)
+	entries, err := ParseCopyInstructionsForConfigs(d, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	resolved := ResolveBuilderStageEntries(d, entries, nil)
+	if resolved[0].IsFromBuildStage() {
+		t.Error("expected entry to be resolved")
+	}
+	if resolved[0].Srcs[0] != ".konflux/catalog/my-operator" {
+		t.Errorf("Srcs[0] = %q, want .konflux/catalog/my-operator", resolved[0].Srcs[0])
+	}
+}
+
+func TestResolveBuilderStageEntries_NumericFromIndex(t *testing.T) {
+	// COPY --from=0 references the first stage by zero-based index.
+	d := mustParseDockerfile(t, `
+FROM ubuntu AS builder
+COPY .konflux/catalog/ /app/catalog/
+
+FROM ubuntu
+COPY --from=0 /app/catalog/my-operator/ /configs/my-operator
+`)
+	entries, err := ParseCopyInstructionsForConfigs(d, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	resolved := ResolveBuilderStageEntries(d, entries, nil)
+	if resolved[0].IsFromBuildStage() {
+		t.Error("expected entry to be resolved via numeric index")
+	}
+	if resolved[0].Srcs[0] != ".konflux/catalog/my-operator" {
+		t.Errorf("Srcs[0] = %q, want .konflux/catalog/my-operator", resolved[0].Srcs[0])
+	}
+}
+
+func TestResolveBuilderStageEntries_NumericFromOutOfRange_Unresolvable(t *testing.T) {
+	d := mustParseDockerfile(t, `
+FROM ubuntu
+COPY --from=99 /app/catalog/my-operator/ /configs/my-operator
+`)
+	entries, err := ParseCopyInstructionsForConfigs(d, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	resolved := ResolveBuilderStageEntries(d, entries, nil)
+	if !resolved[0].IsFromBuildStage() {
+		t.Error("expected entry to remain unresolved — out-of-range numeric index")
+	}
+}
+
 // ── buildGlobalArgMap ─────────────────────────────────────────────────────────
 
 func TestBuildGlobalArgMap_WithDefault(t *testing.T) {
