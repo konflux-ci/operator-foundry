@@ -185,11 +185,32 @@ func resolveAndValidatePath(baseContext, subPath string) (string, error) {
 
 	resolvedCandidate, err := filepath.EvalSymlinks(candidateAbs)
 	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			// path doesn't exist yet — return lexically validated path
-			return candidateAbs, nil
+		if !errors.Is(err, os.ErrNotExist) {
+			return "", fmt.Errorf("failed to resolve symlinks for path %q: %w", candidateAbs, err)
 		}
-		return "", fmt.Errorf("failed to resolve symlinks for path %q: %w", candidateAbs, err)
+		// path doesn't exist yet — walk up to find the deepest existing ancestor
+		// and validate it stays within the build context (guards against a symlinked parent)
+		ancestor := candidateAbs
+		for {
+			parent := filepath.Dir(ancestor)
+			if parent == ancestor {
+				break
+			}
+			ancestor = parent
+			resolved, err := filepath.EvalSymlinks(ancestor)
+			if errors.Is(err, os.ErrNotExist) {
+				continue
+			}
+			if err != nil {
+				return "", fmt.Errorf("failed to resolve symlinks for path %q: %w", ancestor, err)
+			}
+			rel, err := filepath.Rel(resolvedCtx, resolved)
+			if err != nil || strings.HasPrefix(rel, "..") {
+				return "", fmt.Errorf("path %q resolves via symlink to a location outside the build context", subPath)
+			}
+			break
+		}
+		return candidateAbs, nil
 	}
 
 	rel, err = filepath.Rel(resolvedCtx, resolvedCandidate)

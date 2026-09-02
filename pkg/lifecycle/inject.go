@@ -154,9 +154,10 @@ func InjectLifecycleJSON(lifecycleJSONPath, buildContextPath, pkg string, entry 
 
 	for _, src := range entry.Srcs {
 		subPath := filepath.Join(src, pkg)
-		// Cross-reference pkgFromDest to prevent injecting into the catalog root
-		// when the source basename coincidentally matches the package name.
-		if pkgFromDest != "" && filepath.Base(filepath.Clean(src)) == pkg {
+		if pkgFromDest != "" && filepath.Clean(src) != "." {
+			// dest = /configs/<pkg>: src IS the catalog directory regardless of its name.
+			// e.g. COPY ./catalog-4-22/ /configs/gatekeeper-operator-product
+			// Guard against src degenerating to "." when a build ARG is unresolved.
 			subPath = src
 		}
 
@@ -214,4 +215,49 @@ func InjectLifecycleJSON(lifecycleJSONPath, buildContextPath, pkg string, entry 
 	}
 
 	return true, nil
+}
+
+// injectLifecycleJSONAtDir copies lifecycle.json into pkgDir, which must already exist.
+// Returns an error if the source file lacks the lifecycle schema, if lifecycle data
+// already exists in pkgDir, or if the write fails.
+func injectLifecycleJSONAtDir(lifecycleJSONPath, pkgDir, pkg string) error {
+	data, err := os.ReadFile(lifecycleJSONPath)
+	if err != nil {
+		return fmt.Errorf("failed to read lifecycle.json from %q: %w", lifecycleJSONPath, err)
+	}
+
+	if !hasLifecycleSchema(data) {
+		return fmt.Errorf("lifecycle.json at %q does not contain expected schema 'io.openshift.operators.lifecycles.v1alpha1'", lifecycleJSONPath)
+	}
+
+	exists, err := lifecycleSchemaExistsInDir(pkgDir)
+	if err != nil {
+		return fmt.Errorf("failed to check lifecycle schema in %q: %w", pkgDir, err)
+	}
+	if exists {
+		return fmt.Errorf("lifecycle data already exists for package %q at %q, refusing to overwrite", pkg, pkgDir)
+	}
+
+	destPath := filepath.Join(pkgDir, "lifecycle.json")
+	f, err := os.OpenFile(destPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0644)
+	if err != nil {
+		if errors.Is(err, os.ErrExist) {
+			return fmt.Errorf("lifecycle.json already exists at %q, refusing to overwrite", destPath)
+		}
+		return fmt.Errorf("failed to create lifecycle.json at %q: %w", destPath, err)
+	}
+
+	_, writeErr := f.Write(data)
+	closeErr := f.Close()
+
+	if writeErr != nil {
+		_ = os.Remove(destPath)
+		return fmt.Errorf("failed to write lifecycle.json for package %q: %w", pkg, writeErr)
+	}
+	if closeErr != nil {
+		_ = os.Remove(destPath)
+		return fmt.Errorf("failed to close lifecycle.json for package %q: %w", pkg, closeErr)
+	}
+
+	return nil
 }

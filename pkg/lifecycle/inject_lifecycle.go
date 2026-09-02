@@ -32,28 +32,18 @@ import (
 // confirmed eligibility via CheckLifecycleEligibility before calling
 // this function.
 //
-// buildArgs resolves any ARG references used in COPY/ADD source paths (e.g.
-// COPY ./${INPUT_DIR}/ /configs/my-operator) so the actual catalog directory
-// on disk can be located, and should match the build-args the image is
-// actually built with. It may be nil.
+// If catalogPath is non-empty, it is used as the catalog directory for the package
+// (relative to buildContextPath) and Dockerfile parsing is skipped entirely.
+// lifecycle.json is injected directly into that directory. Use this when the
+// only COPY instruction targeting /configs uses --from=builder (source is
+// inside a builder stage, not on local disk).
+//
+// If catalogPath is empty, the Dockerfile is parsed and COPY/ADD instructions
+// targeting /configs are used to locate the catalog source directories.
+// buildArgs resolves any ARG references in those paths. It may be nil.
 //
 // Returns an error if any package fails to inject.
-func InjectLifecycle(dockerfilePath, buildContextPath, lifecycleDir, packages string, buildArgs map[string]string) error {
-	resolvedPath, err := resolveDockerfilePath(dockerfilePath, buildContextPath)
-	if err != nil {
-		return err
-	}
-
-	d, err := dockerfile.Parse(resolvedPath)
-	if err != nil {
-		return fmt.Errorf("failed to parse dockerfile %q: %w", resolvedPath, err)
-	}
-
-	entries, err := ParseCopyInstructionsForConfigs(d, buildArgs)
-	if err != nil {
-		return fmt.Errorf("failed to parse COPY instructions: %w", err)
-	}
-
+func InjectLifecycle(dockerfilePath, buildContextPath, lifecycleDir, packages, catalogPath string, buildArgs map[string]string) error {
 	if strings.Trim(packages, " ,") == "" {
 		return fmt.Errorf("packages list must contain at least one valid package name")
 	}
@@ -74,16 +64,72 @@ func InjectLifecycle(dockerfilePath, buildContextPath, lifecycleDir, packages st
 	packageNames := deduplicate(cleanedPackages)
 	slog.Info("injecting lifecycle for packages", "packages", packageNames)
 
+	if catalogPath != "" {
+		return injectLifecycleFromCatalogPath(buildContextPath, lifecycleDir, catalogPath, packageNames)
+	}
+
+	return injectLifecycleFromDockerfile(dockerfilePath, buildContextPath, lifecycleDir, packageNames, buildArgs)
+}
+
+// injectLifecycleFromCatalogPath injects lifecycle.json using an explicit catalog directory path.
+// catalogPath is the catalog directory for the package; lifecycle.json is injected directly into it.
+func injectLifecycleFromCatalogPath(buildContextPath, lifecycleDir, catalogPath string, packageNames []string) error {
 	for _, pkg := range packageNames {
-		validatedPkg, err := resolveAndValidatePath(lifecycleDir, pkg)
+		lifecycleJSONPath, err := resolveLifecycleJSONPath(lifecycleDir, pkg)
 		if err != nil {
-			return fmt.Errorf("invalid package name %q: %w", pkg, err)
+			return err
 		}
 
-		lifecycleJSONPath := filepath.Join(validatedPkg, "lifecycle.json")
+		pkgDir, err := resolveAndValidatePath(buildContextPath, catalogPath)
+		if err != nil {
+			return fmt.Errorf("invalid catalog path for package %q: %w", pkg, err)
+		}
 
-		if _, err := os.Stat(lifecycleJSONPath); err != nil {
-			return fmt.Errorf("lifecycle.json not found for package %q in %q: %w", pkg, lifecycleDir, err)
+		slog.Info("injecting lifecycle.json", "package", pkg, "dir", pkgDir)
+		if err := injectLifecycleJSONAtDir(lifecycleJSONPath, pkgDir, pkg); err != nil {
+			return fmt.Errorf("failed to inject lifecycle.json for package %q: %w", pkg, err)
+		}
+
+		slog.Info("injected lifecycle.json", "package", pkg)
+	}
+	return nil
+}
+
+// injectLifecycleFromDockerfile injects lifecycle.json by parsing the Dockerfile
+// to locate catalog source directories from COPY/ADD instructions targeting /configs.
+func injectLifecycleFromDockerfile(dockerfilePath, buildContextPath, lifecycleDir string, packageNames []string, buildArgs map[string]string) error {
+	resolvedPath, err := resolveDockerfilePath(dockerfilePath, buildContextPath)
+	if err != nil {
+		return err
+	}
+
+	d, err := dockerfile.Parse(resolvedPath)
+	if err != nil {
+		return fmt.Errorf("failed to parse dockerfile %q: %w", resolvedPath, err)
+	}
+
+	entries, err := ParseCopyInstructionsForConfigs(d, buildArgs)
+	if err != nil {
+		return fmt.Errorf("failed to parse COPY instructions: %w", err)
+	}
+
+	allFromBuilder := len(entries) > 0
+	for _, e := range entries {
+		if !e.IsFromBuildStage() {
+			allFromBuilder = false
+			break
+		}
+	}
+	if allFromBuilder {
+		return fmt.Errorf("all COPY/ADD instructions targeting /configs use --from=<stage>: " +
+			"the catalog source directory is inside a builder stage and cannot be located on local disk. " +
+			"Use --catalog-path to specify the local catalog directory explicitly")
+	}
+
+	for _, pkg := range packageNames {
+		lifecycleJSONPath, err := resolveLifecycleJSONPath(lifecycleDir, pkg)
+		if err != nil {
+			return err
 		}
 
 		injected := false
@@ -114,8 +160,21 @@ func InjectLifecycle(dockerfilePath, buildContextPath, lifecycleDir, packages st
 
 		slog.Info("injected lifecycle.json", "package", pkg)
 	}
-
 	return nil
+}
+
+// resolveLifecycleJSONPath returns the absolute path to lifecycle.json for a package
+// and verifies the file exists.
+func resolveLifecycleJSONPath(lifecycleDir, pkg string) (string, error) {
+	validatedPkg, err := resolveAndValidatePath(lifecycleDir, pkg)
+	if err != nil {
+		return "", fmt.Errorf("invalid package name %q: %w", pkg, err)
+	}
+	path := filepath.Join(validatedPkg, "lifecycle.json")
+	if _, err := os.Stat(path); err != nil {
+		return "", fmt.Errorf("lifecycle.json not found for package %q in %q: %w", pkg, lifecycleDir, err)
+	}
+	return path, nil
 }
 
 // destTargetsPackage returns true if the entry destination is /configs (applies to all packages)
