@@ -3,6 +3,7 @@ module github.com/konflux-ci/operator-foundry
 go 1.26.3
 
 require (
+	github.com/distribution/reference v0.6.0
 	github.com/keilerkonzept/dockerfile-json v1.2.2
 	github.com/moby/buildkit v0.30.0
 	github.com/spf13/cobra v1.10.2
