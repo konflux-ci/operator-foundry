@@ -42,6 +42,30 @@ operator-foundry fbc check-lifecycle-eligibility \
 | All targeted OCP versions >= 5.0 | Writes `true`, exit 0 |
 | Not all targeted OCP versions >= 5.0 | Writes `false`, exit 0 |
 
+### `fbc check-related-images-mediatype`
+
+Checks whether a list of related bundle images use OCI media types that are
+compatible with the target OCP version. Images with an OCI media type are
+incompatible with OCP versions earlier than v4.21.
+
+The related images are provided as a JSON file containing a list of image
+references.
+
+```bash
+operator-foundry fbc check-related-images-mediatype \
+  --ocp-version <version> \
+  --related-images-json-path <path-to-json> \
+  [--output <path-to-output-file>]
+```
+
+| Scenario | Behavior |
+|---|---|
+| Related images JSON cannot be read or parsed | Exits with error |
+| OCP version is malformed | Exits with error |
+| OCP version >= 4.21 (OCI supported natively) | Writes `SUCCESS` result, exit 0 (check skipped) |
+| All related images use compatible media types | Writes `SUCCESS` result, exit 0 |
+| One or more images use incompatible media types or cannot be fetched | Writes `FAILURE` result listing the failed images, exit 0 |
+
 ### `fbc get-packages`
 
 Determines the OLM packages included in a File-Based Catalog (FBC) by parsing
@@ -140,6 +164,7 @@ make clean   # remove build artifacts
 ./bin/operator-foundry --help
 ./bin/operator-foundry fbc --help
 ./bin/operator-foundry fbc check-lifecycle-eligibility --help
+./bin/operator-foundry fbc check-related-images-mediatype --help
 ./bin/operator-foundry fbc get-packages --help
 ./bin/operator-foundry fbc inject-lifecycle --help
 ```
