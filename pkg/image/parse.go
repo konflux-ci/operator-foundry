@@ -34,6 +34,7 @@ var (
 	ErrInvalidImageReference = errors.New("invalid image reference")
 )
 
+
 // ParsedImageURL holds the decomposed components of an OCI image reference.
 type ParsedImageURL struct {
 	RegistryRepository string
