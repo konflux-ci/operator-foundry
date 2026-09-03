@@ -11,6 +11,8 @@ RUN CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o operator-foundry ./cmd/
 
 FROM registry.access.redhat.com/ubi9/ubi-minimal:latest@sha256:5b74fce9d6e629942a0c6dc0f546c193e70d7f974d999a48c948c53dd3d36362
 
+ARG PATH_TO_ART=/cachi2/output/deps/generic
+
 LABEL \
   name="operator-foundry" \
   com.redhat.component="konflux-operator-foundry" \
@@ -19,6 +21,24 @@ LABEL \
   io.k8s.display-name="operator-foundry" \
   summary="Konflux operator pipeline task CLI" \
   io.openshift.tags="konflux,operator,olm,fbc"
+
+RUN set -eux; \
+    install_opm() { \
+      version="$1"; \
+      cp "${PATH_TO_ART}/linux-amd64-opm-${version}" "/usr/local/bin/opm-${version}"; \
+      chmod 0555 "/usr/local/bin/opm-${version}"; \
+    }; \
+    install_opm "v1.26.4"; \
+    install_opm "v1.28.0"; \
+    install_opm "v1.40.0"; \
+    install_opm "v1.44.0"; \
+    install_opm "v1.48.0"; \
+    install_opm "v1.50.0"; \
+    install_opm "v1.57.0"; \
+    install_opm "v1.61.0"; \
+    install_opm "v1.67.0"; \
+    install_opm "v1.69.0"; \
+    install_opm "v1.73.0"
 
 COPY --from=builder /opt/app-root/src/operator-foundry /usr/local/bin/operator-foundry
 COPY LICENSE /licenses/LICENSE

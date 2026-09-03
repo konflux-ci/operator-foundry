@@ -29,3 +29,10 @@ jobs:
         uses: golangci/golangci-lint-action@9fae48acfc02a90574d7c304a1758ef9895495fa
         with:
           version: v2.12.2
+
+      - name: Lint Dockerfile
+        # hadolint/hadolint-action@v3.5.0
+        uses: hadolint/hadolint-action@06be81baf89a55ffd0e24b8f04a4185738dd3387
+        with:
+          dockerfile: Dockerfile
+          failure-threshold: error
