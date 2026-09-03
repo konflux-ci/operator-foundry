@@ -17,6 +17,8 @@ limitations under the License.
 package fbc
 
 import (
+	"fmt"
+
 	"github.com/konflux-ci/operator-foundry/pkg/lifecycle"
 	"github.com/spf13/cobra"
 )
@@ -26,6 +28,7 @@ func newInjectLifecycleCmd() *cobra.Command {
 	var buildContextPath string
 	var lifecycleDir string
 	var packages string
+	var catalogPath string
 	var buildArgFlags []string
 
 	cmd := &cobra.Command{
@@ -38,26 +41,42 @@ This command does not check OCP eligibility. Callers are expected to have
 already confirmed the Dockerfile is eligible for lifecycle injection via
 "fbc check-lifecycle-eligibility" before calling this command.
 
-If a COPY/ADD source path references a build ARG (e.g.
-COPY ./${INPUT_DIR}/ /configs/my-operator), pass its value with --build-arg so
-the actual catalog directory on disk can be located.`,
+If --catalog-path is provided, it is used as the parent catalog directory
+(relative to --build-context) and Dockerfile parsing is skipped entirely.
+lifecycle.json is injected into <catalog-path>/<package>/ for each package.
+Use this when all COPY instructions targeting /configs use --from=builder
+(the source is inside a builder stage, not on local disk).
+
+If --catalog-path is omitted, the Dockerfile is parsed and COPY/ADD
+instructions targeting /configs are used to locate the catalog source
+directories. If a source path references a build ARG (e.g.
+COPY ./${INPUT_DIR}/ /configs/my-operator), pass its value with --build-arg
+so the actual catalog directory on disk can be located.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if catalogPath != "" && dockerfilePath != "" {
+				return fmt.Errorf("--catalog-path and --dockerfile are mutually exclusive: when --catalog-path is set, Dockerfile parsing is skipped entirely")
+			}
+			if catalogPath == "" && dockerfilePath == "" {
+				return fmt.Errorf("required flag \"dockerfile\" not set (omit it only when --catalog-path is provided)")
+			}
+
 			buildArgs, err := parseBuildArgs(buildArgFlags)
 			if err != nil {
 				return err
 			}
 
-			return lifecycle.InjectLifecycle(dockerfilePath, buildContextPath, lifecycleDir, packages, buildArgs)
+			return lifecycle.InjectLifecycle(dockerfilePath, buildContextPath, lifecycleDir, packages, catalogPath, buildArgs)
 		},
 	}
 
-	cmd.Flags().StringVar(&dockerfilePath, "dockerfile", "", "Path to the FBC Dockerfile (required)")
+	cmd.Flags().StringVar(&dockerfilePath, "dockerfile", "", "Path to the FBC Dockerfile (required unless --catalog-path is set)")
 	cmd.Flags().StringVar(&buildContextPath, "build-context", "", "Path to the build context directory (required)")
 	cmd.Flags().StringVar(&lifecycleDir, "lifecycle-dir", "", "Directory containing per-package lifecycle.json files, structured as <dir>/<package>/lifecycle.json (required)")
 	cmd.Flags().StringVar(&packages, "packages", "", "Comma-separated list of package names (required)")
+	cmd.Flags().StringVar(&catalogPath, "catalog-path", "", "Parent catalog directory relative to --build-context (e.g. .konflux/catalog). When set, Dockerfile parsing is skipped and lifecycle.json is injected into <catalog-path>/<package>/ for each package.")
 	cmd.Flags().StringArrayVar(&buildArgFlags, "build-arg", nil, "Build arg used to resolve ARG references in COPY/ADD source paths, as KEY=VALUE (may be repeated)")
 
-	for _, flag := range []string{"dockerfile", "build-context", "lifecycle-dir", "packages"} {
+	for _, flag := range []string{"build-context", "lifecycle-dir", "packages"} {
 		if err := cmd.MarkFlagRequired(flag); err != nil {
 			panic(err)
 		}
