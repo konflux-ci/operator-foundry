@@ -19,7 +19,6 @@ limitations under the License.
 package image
 
 import (
-	"errors"
 	"fmt"
 	"strings"
 
@@ -31,15 +30,6 @@ import (
 // untagged references, preserving the caller's ability to distinguish
 // tagged from untagged inputs.
 var parseOpts = []name.Option{name.WithDefaultTag("")}
-
-var (
-	// ErrEmptyImageURL is returned when the provided image reference is empty.
-	ErrEmptyImageURL = errors.New("image URL is empty")
-
-	// ErrInvalidImageReference is returned when the image reference does not
-	// conform to the OCI distribution spec.
-	ErrInvalidImageReference = errors.New("invalid image reference")
-)
 
 // ParsedImageURL holds the decomposed components of an OCI image reference.
 type ParsedImageURL struct {
