@@ -19,7 +19,6 @@ limitations under the License.
 package image
 
 import (
-	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -33,15 +32,6 @@ import (
 // tagged from untagged inputs.
 var parseOpts = []name.Option{name.WithDefaultTag("")}
 
-var (
-	// ErrEmptyImageURL is returned when the provided image reference is empty.
-	ErrEmptyImageURL = errors.New("image URL is empty")
-
-	// ErrInvalidImageReference is returned when the image reference does not
-	// conform to the OCI distribution spec.
-	ErrInvalidImageReference = errors.New("invalid image reference")
-)
-
 // ParsedImageURL holds the decomposed components of an OCI image reference.
 type ParsedImageURL struct {
 	RegistryRepository string
@@ -54,18 +44,18 @@ type ParsedImageURL struct {
 // that do not conform to the OCI distribution spec.
 // Unqualified names (e.g. "ubuntu", "nginx:latest") are rejected — callers
 // must supply fully-qualified references containing a registry domain.
-func ParseImageURL(imageURL string) (ParsedImageURL, error) {
-	if imageURL == "" {
+func ParseImageURL(imageRef string) (ParsedImageURL, error) {
+	if imageRef == "" {
 		return ParsedImageURL{}, ErrEmptyImageURL
 	}
 
-	if !looksFullyQualified(imageURL) {
-		return ParsedImageURL{}, fmt.Errorf("%w: %q: unqualified image name, expected fully-qualified reference with registry", ErrInvalidImageReference, imageURL)
+	if !looksFullyQualified(imageRef) {
+		return ParsedImageURL{}, fmt.Errorf("%w: %q: unqualified image name, expected fully-qualified reference with registry", ErrInvalidImageReference, imageRef)
 	}
 
-	ref, err := name.ParseReference(imageURL, parseOpts...)
+	ref, err := name.ParseReference(imageRef, parseOpts...)
 	if err != nil {
-		return ParsedImageURL{}, fmt.Errorf("%w: %q: %s", ErrInvalidImageReference, imageURL, err)
+		return ParsedImageURL{}, fmt.Errorf("%w: %q: %w", ErrInvalidImageReference, imageRef, err)
 	}
 
 	registryRepository := ref.Context().String()
@@ -77,14 +67,14 @@ func ParseImageURL(imageURL string) (ParsedImageURL, error) {
 		tag = r.TagStr()
 	case name.Digest:
 		digest = r.DigestStr()
-		tag = extractTagBeforeDigest(imageURL)
+		tag = extractTagBeforeDigest(imageRef)
 	}
 
 	if tag == "" {
-		slog.Debug("parsed image reference has no tag", "imageURL", imageURL)
+		slog.Debug("parsed image reference has no tag", "imageRef", imageRef)
 	}
 	if digest == "" {
-		slog.Debug("parsed image reference has no digest", "imageURL", imageURL)
+		slog.Debug("parsed image reference has no digest", "imageRef", imageRef)
 	}
 
 	return ParsedImageURL{
@@ -126,10 +116,22 @@ func extractTagBeforeDigest(ref string) string {
 	return candidate
 }
 
+// normalizeImageRef reconstructs an image reference from its parsed components,
+// preferring digest form when available, otherwise preserving the tag.
+func normalizeImageRef(parsed ParsedImageURL) string {
+	ref := parsed.RegistryRepository
+	if parsed.Digest != "" {
+		ref += "@" + parsed.Digest
+	} else if parsed.Tag != "" {
+		ref += ":" + parsed.Tag
+	}
+	return ref
+}
+
 // GetImageRegistryAndRepository returns the registry and repository portion of
 // the image reference, without tag or digest.
-func GetImageRegistryAndRepository(imageURL string) (string, error) {
-	parsed, err := ParseImageURL(imageURL)
+func GetImageRegistryAndRepository(imageRef string) (string, error) {
+	parsed, err := ParseImageURL(imageRef)
 	if err != nil {
 		return "", err
 	}
@@ -138,28 +140,28 @@ func GetImageRegistryAndRepository(imageURL string) (string, error) {
 
 // GetImageRegistryRepositoryTag returns registry/repository:tag, or just
 // registry/repository when no tag is present.
-func GetImageRegistryRepositoryTag(imageURL string) (string, error) {
-	parsed, err := ParseImageURL(imageURL)
+func GetImageRegistryRepositoryTag(imageRef string) (string, error) {
+	parsed, err := ParseImageURL(imageRef)
 	if err != nil {
 		return "", err
 	}
 	if parsed.Tag != "" {
 		return parsed.RegistryRepository + ":" + parsed.Tag, nil
 	}
-	slog.Debug("returning registry/repository without tag", "imageURL", imageURL)
+	slog.Debug("returning registry/repository without tag", "imageRef", imageRef)
 	return parsed.RegistryRepository, nil
 }
 
 // GetImageRegistryRepositoryDigest returns registry/repository@digest, or just
 // registry/repository when no digest is present.
-func GetImageRegistryRepositoryDigest(imageURL string) (string, error) {
-	parsed, err := ParseImageURL(imageURL)
+func GetImageRegistryRepositoryDigest(imageRef string) (string, error) {
+	parsed, err := ParseImageURL(imageRef)
 	if err != nil {
 		return "", err
 	}
 	if parsed.Digest != "" {
 		return parsed.RegistryRepository + "@" + parsed.Digest, nil
 	}
-	slog.Debug("returning registry/repository without digest", "imageURL", imageURL)
+	slog.Debug("returning registry/repository without digest", "imageRef", imageRef)
 	return parsed.RegistryRepository, nil
 }
