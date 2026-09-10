@@ -119,6 +119,14 @@ func deduplicate(s []string) []string {
 	return result
 }
 
+// validatePackageName returns an error if pkg is empty, a path traversal component, or contains path separators.
+func validatePackageName(pkg string) error {
+	if pkg == "" || pkg == "." || pkg == ".." || strings.ContainsAny(pkg, "/\\") {
+		return fmt.Errorf("invalid package name %q: must not be empty, '.', '..', or contain path separators", pkg)
+	}
+	return nil
+}
+
 // resolveDockerfilePath resolves dockerfilePath to an openable path. If it
 // exists as given (relative to the current working directory, or absolute),
 // it is returned unchanged. Otherwise it is resolved relative to
