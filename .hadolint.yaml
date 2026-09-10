@@ -1,0 +1,5 @@
+---
+# Hadolint config for operator-foundry container image.
+trustedRegistries:
+  - registry.access.redhat.com
+  - registry.redhat.io
