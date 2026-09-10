@@ -54,7 +54,7 @@ COPY catalog /configs
 		t.Fatalf("failed to write lifecycle file: %v", err)
 	}
 
-	if err := InjectLifecycle(dockerfilePath, base, lifecycleDir, "my-operator", nil); err != nil {
+	if err := InjectLifecycle(dockerfilePath, base, lifecycleDir, "my-operator", "", nil); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -90,7 +90,7 @@ LABEL com.redhat.fbc.openshift.version=["5.0"]
 COPY catalog /configs
 `)
 
-	if err := InjectLifecycle(dockerfilePath, base, lifecycleDir, "operator-a,operator-b", nil); err != nil {
+	if err := InjectLifecycle(dockerfilePath, base, lifecycleDir, "operator-a,operator-b", "", nil); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -129,7 +129,7 @@ COPY catalog /configs
 	}
 
 	// dockerfile path is relative to the build context, not the current directory.
-	if err := InjectLifecycle("catalog.Dockerfile", ctx, lifecycleDir, "my-operator", nil); err != nil {
+	if err := InjectLifecycle("catalog.Dockerfile", ctx, lifecycleDir, "my-operator", "", nil); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -155,14 +155,14 @@ LABEL com.redhat.fbc.openshift.version=["5.0"]
 COPY catalog /configs
 `)
 
-	err := InjectLifecycle(dockerfilePath, base, lifecycleDir, "my-operator", nil)
+	err := InjectLifecycle(dockerfilePath, base, lifecycleDir, "my-operator", "", nil)
 	if err == nil {
 		t.Fatal("expected error for missing lifecycle file, got nil")
 	}
 }
 
 func TestInjectLifecycle_InvalidDockerfile_ReturnsError(t *testing.T) {
-	err := InjectLifecycle("/nonexistent/Dockerfile", t.TempDir(), t.TempDir(), "my-operator", nil)
+	err := InjectLifecycle("/nonexistent/Dockerfile", t.TempDir(), t.TempDir(), "my-operator", "", nil)
 	if err == nil {
 		t.Fatal("expected error for nonexistent Dockerfile, got nil")
 	}
@@ -192,7 +192,7 @@ COPY catalog /configs
 	}
 
 	// packages string with extra whitespace
-	if err := InjectLifecycle(dockerfilePath, base, lifecycleDir, " my-operator ", nil); err != nil {
+	if err := InjectLifecycle(dockerfilePath, base, lifecycleDir, " my-operator ", "", nil); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -225,7 +225,7 @@ COPY catalog/operator-a /configs/operator-a
 COPY catalog/operator-b /configs/operator-b
 `)
 
-	if err := InjectLifecycle(dockerfilePath, base, lifecycleDir, "operator-a,operator-b", nil); err != nil {
+	if err := InjectLifecycle(dockerfilePath, base, lifecycleDir, "operator-a,operator-b", "", nil); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -244,7 +244,7 @@ COPY catalog /configs
 `)
 
 	for _, packages := range []string{",", ",,", "  ,  ", " "} {
-		err := InjectLifecycle(dockerfilePath, base, t.TempDir(), packages, nil)
+		err := InjectLifecycle(dockerfilePath, base, t.TempDir(), packages, "", nil)
 		if err == nil {
 			t.Errorf("expected error for degenerate packages string %q, got nil", packages)
 		}
@@ -276,7 +276,7 @@ COPY catalog /configs
 COPY catalog /configs
 `)
 
-	if err := InjectLifecycle(dockerfilePath, base, lifecycleDir, "my-operator", nil); err != nil {
+	if err := InjectLifecycle(dockerfilePath, base, lifecycleDir, "my-operator", "", nil); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -290,11 +290,16 @@ COPY catalog /configs
 }
 
 func TestInjectLifecycle_BuildArgResolvesInputDirSourcePath(t *testing.T) {
-	// A stage-scoped ARG with no default, used only in the COPY source path.
+	// Models the gatekeeper-operator-fbc pattern:
+	//   ARG INPUT_DIR
+	//   COPY ./${INPUT_DIR}/ /configs/gatekeeper-operator-product
+	// INPUT_DIR points to the catalog directory (e.g. catalog-4-22/) whose contents
+	// are copied to /configs/gatekeeper-operator-product/ in the image.
+	// lifecycle.json must be written at the root of that catalog directory.
 	base := t.TempDir()
 	lifecycleDir := t.TempDir()
 
-	pkgDir := filepath.Join(base, "catalog", "v5.0", "gatekeeper-operator-product")
+	pkgDir := filepath.Join(base, "catalog-4-22")
 	if err := os.MkdirAll(pkgDir, 0755); err != nil {
 		t.Fatalf("failed to create package dir: %v", err)
 	}
@@ -320,19 +325,22 @@ COPY --from=builder /tmp/cache /tmp/cache
 		t.Fatalf("failed to write lifecycle file: %v", err)
 	}
 
-	// Without the matching build-arg, the real catalog subdirectory can't be found.
-	if err := InjectLifecycle(dockerfilePath, base, lifecycleDir, "gatekeeper-operator-product", nil); err == nil {
+	// Without the matching build-arg, INPUT_DIR resolves to empty and src degenerates
+	// to "./" — the guard prevents injecting into the build context root.
+	if err := InjectLifecycle(dockerfilePath, base, lifecycleDir, "gatekeeper-operator-product", "", nil); err == nil {
 		t.Fatal("expected error when INPUT_DIR build-arg is not provided, got nil")
 	}
 
-	buildArgs := map[string]string{"INPUT_DIR": "catalog/v5.0"}
-	if err := InjectLifecycle(dockerfilePath, base, lifecycleDir, "gatekeeper-operator-product", buildArgs); err != nil {
+	// With the build-arg, src = "./catalog-4-22/" IS the catalog directory.
+	// lifecycle.json goes at catalog-4-22/lifecycle.json.
+	buildArgs := map[string]string{"INPUT_DIR": "catalog-4-22"}
+	if err := InjectLifecycle(dockerfilePath, base, lifecycleDir, "gatekeeper-operator-product", "", buildArgs); err != nil {
 		t.Fatalf("unexpected error with matching build-arg: %v", err)
 	}
 
 	got, err := os.ReadFile(filepath.Join(pkgDir, "lifecycle.json"))
 	if err != nil {
-		t.Fatalf("lifecycle.json not injected: %v", err)
+		t.Fatalf("lifecycle.json not injected at catalog-4-22/lifecycle.json: %v", err)
 	}
 	if string(got) != string(lifecycleData) {
 		t.Errorf("content mismatch\ngot: %s\nwant: %s", got, lifecycleData)
@@ -363,7 +371,134 @@ COPY catalog /configs
 `)
 
 	// duplicate package name — should be deduplicated and not cause O_EXCL failure
-	if err := InjectLifecycle(dockerfilePath, base, lifecycleDir, "my-operator,my-operator", nil); err != nil {
+	if err := InjectLifecycle(dockerfilePath, base, lifecycleDir, "my-operator,my-operator", "", nil); err != nil {
 		t.Fatalf("unexpected error for duplicate package names: %v", err)
+	}
+}
+
+func TestInjectLifecycle_CatalogPath_InjectsIntoExistingDir(t *testing.T) {
+	lifecycleData := []byte(`{"schema":"io.openshift.operators.lifecycles.v1alpha1"}`)
+	base := t.TempDir()
+	lifecycleDir := filepath.Join(base, "lifecycle")
+
+	// catalog-path is the parent dir; lifecycle.json goes into catalog-path/my-operator/
+	pkgDir := filepath.Join(base, "v4.18", "catalog", "my-operator")
+	if err := os.MkdirAll(pkgDir, 0755); err != nil {
+		t.Fatalf("failed to create pkg dir: %v", err)
+	}
+
+	pkgLifecycleDir := filepath.Join(lifecycleDir, "my-operator")
+	if err := os.MkdirAll(pkgLifecycleDir, 0755); err != nil {
+		t.Fatalf("failed to create lifecycle dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(pkgLifecycleDir, "lifecycle.json"), lifecycleData, 0644); err != nil {
+		t.Fatalf("failed to write lifecycle.json: %v", err)
+	}
+
+	if err := InjectLifecycle("ignored.Dockerfile", base, lifecycleDir, "my-operator", "v4.18/catalog", nil); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if _, err := os.Stat(filepath.Join(pkgDir, "lifecycle.json")); err != nil {
+		t.Errorf("lifecycle.json not found at expected path: %v", err)
+	}
+}
+
+func TestInjectLifecycle_CatalogPath_FailsIfDirectoryAbsent(t *testing.T) {
+	lifecycleData := []byte(`{"schema":"io.openshift.operators.lifecycles.v1alpha1"}`)
+	base := t.TempDir()
+	lifecycleDir := filepath.Join(base, "lifecycle")
+
+	// catalog dir does NOT exist on disk — injection must fail
+	pkgLifecycleDir := filepath.Join(lifecycleDir, "my-operator")
+	if err := os.MkdirAll(pkgLifecycleDir, 0755); err != nil {
+		t.Fatalf("failed to create lifecycle dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(pkgLifecycleDir, "lifecycle.json"), lifecycleData, 0644); err != nil {
+		t.Fatalf("failed to write lifecycle.json: %v", err)
+	}
+
+	err := InjectLifecycle("ignored.Dockerfile", base, lifecycleDir, "my-operator", "v4.18/catalog", nil)
+	if err == nil {
+		t.Fatal("expected error when catalog directory does not exist, got nil")
+	}
+}
+
+func TestInjectLifecycle_CatalogPath_RejectsPathTraversal(t *testing.T) {
+	// --catalog-path must not escape the build context via path traversal.
+	base := t.TempDir()
+	lifecycleDir := t.TempDir()
+
+	pkgLifecycleDir := filepath.Join(lifecycleDir, "my-operator")
+	if err := os.MkdirAll(pkgLifecycleDir, 0755); err != nil {
+		t.Fatalf("failed to create lifecycle dir: %v", err)
+	}
+	lifecycleData := []byte(`{"schema":"io.openshift.operators.lifecycles.v1alpha1"}`)
+	if err := os.WriteFile(filepath.Join(pkgLifecycleDir, "lifecycle.json"), lifecycleData, 0644); err != nil {
+		t.Fatalf("failed to write lifecycle.json: %v", err)
+	}
+
+	err := InjectLifecycle("ignored.Dockerfile", base, lifecycleDir, "my-operator", "../../etc", nil)
+	if err == nil {
+		t.Fatal("expected error for path-traversal catalog-path, got nil")
+	}
+}
+
+func TestInjectLifecycle_CatalogPath_RefusesOverwrite(t *testing.T) {
+	lifecycleData := []byte(`{"schema":"io.openshift.operators.lifecycles.v1alpha1"}`)
+	base := t.TempDir()
+	lifecycleDir := filepath.Join(base, "lifecycle")
+
+	pkgDir := filepath.Join(base, "catalog", "my-operator")
+	if err := os.MkdirAll(pkgDir, 0755); err != nil {
+		t.Fatalf("failed to create pkg dir: %v", err)
+	}
+	// pre-existing lifecycle data
+	if err := os.WriteFile(filepath.Join(pkgDir, "lifecycle.json"), lifecycleData, 0644); err != nil {
+		t.Fatalf("failed to write existing lifecycle.json: %v", err)
+	}
+
+	pkgLifecycleDir := filepath.Join(lifecycleDir, "my-operator")
+	if err := os.MkdirAll(pkgLifecycleDir, 0755); err != nil {
+		t.Fatalf("failed to create lifecycle dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(pkgLifecycleDir, "lifecycle.json"), lifecycleData, 0644); err != nil {
+		t.Fatalf("failed to write lifecycle.json: %v", err)
+	}
+
+	err := InjectLifecycle("ignored.Dockerfile", base, lifecycleDir, "my-operator", "catalog", nil)
+	if err == nil {
+		t.Fatal("expected error when lifecycle.json already exists, got nil")
+	}
+}
+
+func TestInjectLifecycle_CatalogPath_MultiplePackages(t *testing.T) {
+	// --catalog-path is the parent dir; each package gets its own subdir.
+	// Models the rhodf-fbc pattern: odf-operator, mcg-operator under catalog/.
+	lifecycleData := []byte(`{"schema":"io.openshift.operators.lifecycles.v1alpha1"}`)
+	base := t.TempDir()
+	lifecycleDir := t.TempDir()
+
+	for _, pkg := range []string{"odf-operator", "mcg-operator"} {
+		if err := os.MkdirAll(filepath.Join(base, "catalog", pkg), 0755); err != nil {
+			t.Fatalf("failed to create catalog pkg dir for %s: %v", pkg, err)
+		}
+		pkgLifecycleDir := filepath.Join(lifecycleDir, pkg)
+		if err := os.MkdirAll(pkgLifecycleDir, 0755); err != nil {
+			t.Fatalf("failed to create lifecycle dir for %s: %v", pkg, err)
+		}
+		if err := os.WriteFile(filepath.Join(pkgLifecycleDir, "lifecycle.json"), lifecycleData, 0644); err != nil {
+			t.Fatalf("failed to write lifecycle.json for %s: %v", pkg, err)
+		}
+	}
+
+	if err := InjectLifecycle("ignored.Dockerfile", base, lifecycleDir, "odf-operator,mcg-operator", "catalog", nil); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	for _, pkg := range []string{"odf-operator", "mcg-operator"} {
+		if _, err := os.Stat(filepath.Join(base, "catalog", pkg, "lifecycle.json")); err != nil {
+			t.Errorf("lifecycle.json not found for package %s: %v", pkg, err)
+		}
 	}
 }

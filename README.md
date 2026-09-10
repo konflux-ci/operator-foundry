@@ -73,27 +73,37 @@ Injects pre-generated `lifecycle.json` files into the catalog source directories
 for the given OLM packages. Does not check lifecycle-injection eligibility —
 callers should run `fbc check-lifecycle-eligibility` first.
 
-If a COPY/ADD source path references a build ARG (e.g. COPY ./${INPUT_DIR}/ /configs/my-operator), pass its value with --build-arg so
+If a `COPY`/`ADD` source path references a build ARG (e.g. `COPY ./${INPUT_DIR}/ /configs/my-operator`), pass its value with `--build-arg` so
 the actual catalog directory on disk can be located. If omitted, the ARG's
 own default value from the Dockerfile is used instead.
 
 ```bash
 operator-foundry fbc inject-lifecycle \
-  --dockerfile <path-to-Dockerfile> \
+  [--dockerfile <path-to-Dockerfile>] \
   --build-context <path-to-build-context> \
   --packages <comma-separated-package-names> \
   --lifecycle-dir <path-to-lifecycle-dir> \
-  [--build-arg KEY=VALUE]...
+  [--build-arg KEY=VALUE]... \
+  [--catalog-path <catalog-dir-relative-to-build-context>]
 ```
+
+`--dockerfile` is required unless `--catalog-path` is set.
+
+`--catalog-path` is an optional shortcut that bypasses Dockerfile parsing. When
+provided, it is treated as the parent catalog directory (relative to
+`--build-context`) and `lifecycle.json` is injected into `<catalog-path>/<package>/`
+for each package. Use this when all `COPY` instructions targeting `/configs` use
+`--from=<stage>`.
 
 | Scenario | Behavior |
 |---|---|
-| Dockerfile cannot be parsed | Exits with error |
+| Dockerfile cannot be parsed (no `--catalog-path`) | Exits with error |
+| All `COPY`/`ADD` instructions targeting `/configs` use `--from=<stage>` | Exits with error — advises use of `--catalog-path` |
 | `lifecycle.json` missing for a package | Exits with error |
 | lifecycle schema already exists at destination | Exits with error — refuses to overwrite |
-| No matching catalog directory found for package | Exits with error |
+| No matching catalog directory found for package (no `--catalog-path`) | Exits with error |
 | Invalid package name (path traversal, empty) | Exits with error |
-| Destination path deeper than `/configs/<package-name>` | Exits with error — not a valid FBC path |
+| Destination path deeper than `/configs/<package-name>` (no `--catalog-path`) | Exits with error — not a valid FBC path |
 
 ---
 

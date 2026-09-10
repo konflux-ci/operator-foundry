@@ -106,8 +106,11 @@ func lifecycleSchemaExistsInDir(pkgDir string) (bool, error) {
 }
 
 // InjectLifecycleJSON copies a pre-generated lifecycle.json into the catalog directory
-// for a given package within the build context. Handles three COPY dest patterns:
-// /configs, /configs/<pkg>, and /configs/<pkg> with a catalog-root src.
+// for a given package within the build context. Handles two COPY dest patterns:
+//   - dest=/configs: src must contain a subdirectory named <pkg>; lifecycle.json is written there.
+//   - dest=/configs/<pkg>: src IS the catalog directory for the package regardless of its name;
+//     lifecycle.json is written directly into src. A guard rejects src that degenerates to "."
+//     (e.g. when a build ARG is unresolved).
 //
 // Returns (true, nil) on success, (false, nil) if no matching directory was found,
 // or (false, err) on failure.
@@ -122,8 +125,8 @@ func InjectLifecycleJSON(lifecycleJSONPath, buildContextPath, pkg string, entry 
 		return false, fmt.Errorf("cannot inject lifecycle.json into build stage dependencies (COPY --from=%s)", entry.From)
 	}
 
-	if pkg == "" || pkg == "." || pkg == ".." || strings.ContainsAny(pkg, "/\\") {
-		return false, fmt.Errorf("invalid package name %q: must not be empty, '.', '..', or contain path separators", pkg)
+	if err := validatePackageName(pkg); err != nil {
+		return false, err
 	}
 
 	data, err := os.ReadFile(lifecycleJSONPath)
@@ -154,9 +157,10 @@ func InjectLifecycleJSON(lifecycleJSONPath, buildContextPath, pkg string, entry 
 
 	for _, src := range entry.Srcs {
 		subPath := filepath.Join(src, pkg)
-		// Cross-reference pkgFromDest to prevent injecting into the catalog root
-		// when the source basename coincidentally matches the package name.
-		if pkgFromDest != "" && filepath.Base(filepath.Clean(src)) == pkg {
+		if pkgFromDest != "" && filepath.Clean(src) != "." {
+			// dest = /configs/<pkg>: src IS the catalog directory regardless of its name.
+			// e.g. COPY ./catalog-4-22/ /configs/gatekeeper-operator-product
+			// Guard against src degenerating to "." when a build ARG is unresolved.
 			subPath = src
 		}
 
@@ -214,4 +218,58 @@ func InjectLifecycleJSON(lifecycleJSONPath, buildContextPath, pkg string, entry 
 	}
 
 	return true, nil
+}
+
+// injectLifecycleJSONAtDir copies lifecycle.json into pkgDir, which must already exist.
+// Returns an error if the source file lacks the lifecycle schema, if lifecycle data
+// already exists in pkgDir, or if the write fails.
+func injectLifecycleJSONAtDir(lifecycleJSONPath, pkgDir, pkg string) error {
+	if info, err := os.Stat(pkgDir); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("catalog directory %q does not exist", pkgDir)
+		}
+		return fmt.Errorf("failed to stat catalog directory %q: %w", pkgDir, err)
+	} else if !info.IsDir() {
+		return fmt.Errorf("catalog path %q is not a directory", pkgDir)
+	}
+
+	data, err := os.ReadFile(lifecycleJSONPath)
+	if err != nil {
+		return fmt.Errorf("failed to read lifecycle.json from %q: %w", lifecycleJSONPath, err)
+	}
+
+	if !hasLifecycleSchema(data) {
+		return fmt.Errorf("lifecycle.json at %q does not contain expected schema 'io.openshift.operators.lifecycles.v1alpha1'", lifecycleJSONPath)
+	}
+
+	exists, err := lifecycleSchemaExistsInDir(pkgDir)
+	if err != nil {
+		return fmt.Errorf("failed to check lifecycle schema in %q: %w", pkgDir, err)
+	}
+	if exists {
+		return fmt.Errorf("lifecycle data already exists for package %q at %q, refusing to overwrite", pkg, pkgDir)
+	}
+
+	destPath := filepath.Join(pkgDir, "lifecycle.json")
+	f, err := os.OpenFile(destPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0644)
+	if err != nil {
+		if errors.Is(err, os.ErrExist) {
+			return fmt.Errorf("lifecycle.json already exists at %q, refusing to overwrite", destPath)
+		}
+		return fmt.Errorf("failed to create lifecycle.json at %q: %w", destPath, err)
+	}
+
+	_, writeErr := f.Write(data)
+	closeErr := f.Close()
+
+	if writeErr != nil {
+		_ = os.Remove(destPath)
+		return fmt.Errorf("failed to write lifecycle.json for package %q: %w", pkg, writeErr)
+	}
+	if closeErr != nil {
+		_ = os.Remove(destPath)
+		return fmt.Errorf("failed to close lifecycle.json for package %q: %w", pkg, closeErr)
+	}
+
+	return nil
 }

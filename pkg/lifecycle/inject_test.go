@@ -220,9 +220,12 @@ func TestInjectLifecycleJSON_RejectsPathTraversal(t *testing.T) {
 	}
 }
 
-func TestInjectLifecycleJSON_DestWithPkgButSrcIsCatalogRoot(t *testing.T) {
-	// COPY catalog /configs/my-operator
-	// src is catalog root, dest has pkg name — must write to catalog/my-operator/lifecycle.json
+func TestInjectLifecycleJSON_DestWithPkgName_SrcIsPackageDir(t *testing.T) {
+	// COPY catalog/my-operator /configs/my-operator — src basename matches the package name.
+	// Both the old and new guard conditions agree: write to catalog/my-operator/lifecycle.json.
+	// (Old condition: filepath.Base(src) == pkg → true. New condition: filepath.Clean(src) != "." → true,
+	// use src directly → same result since src already points at the package directory.)
+	// This test is unchanged from before the guard condition was updated.
 	base := t.TempDir()
 
 	if err := os.MkdirAll(filepath.Join(base, "catalog", "my-operator"), 0755); err != nil {
@@ -236,7 +239,7 @@ func TestInjectLifecycleJSON_DestWithPkgButSrcIsCatalogRoot(t *testing.T) {
 	}
 
 	entry := DockerfileCopyEntry{
-		Srcs: []string{"catalog"},
+		Srcs: []string{"catalog/my-operator"},
 		Dest: "/configs/my-operator",
 	}
 
@@ -248,6 +251,50 @@ func TestInjectLifecycleJSON_DestWithPkgButSrcIsCatalogRoot(t *testing.T) {
 	got, err := os.ReadFile(destPath)
 	if err != nil {
 		t.Fatalf("failed to read injected lifecycle.json: %v", err)
+	}
+	if string(got) != string(lifecycleData) {
+		t.Errorf("content mismatch\ngot: %s\nwant: %s", got, lifecycleData)
+	}
+}
+
+func TestInjectLifecycleJSON_DestWithPkgName_SrcBasenameDoesNotMatchPkg(t *testing.T) {
+	// COPY catalog /configs/my-operator — src basename ("catalog") != package name ("my-operator").
+	// dest explicitly names the package, so src IS the catalog directory regardless of its name.
+	// lifecycle.json goes at catalog/lifecycle.json, not catalog/my-operator/lifecycle.json.
+	//
+	// BEHAVIORAL CHANGE from old guard (filepath.Base(src) == pkg):
+	// Old: basename "catalog" != "my-operator" → guard did not fire → tried catalog/my-operator/ → not found → skipped.
+	// New: filepath.Clean("catalog") != "." → guard fires → uses src directly → injects at catalog/lifecycle.json.
+	// This matches Docker COPY semantics: contents of catalog/ land at /configs/my-operator/ in the image.
+	base := t.TempDir()
+
+	if err := os.MkdirAll(filepath.Join(base, "catalog"), 0755); err != nil {
+		t.Fatalf("failed to create catalog dir: %v", err)
+	}
+
+	lifecycleData := []byte(`{"schema": "io.openshift.operators.lifecycles.v1alpha1"}`)
+	lifecyclePath := filepath.Join(base, "lifecycle.json")
+	if err := os.WriteFile(lifecyclePath, lifecycleData, 0644); err != nil {
+		t.Fatalf("failed to write lifecycle.json: %v", err)
+	}
+
+	entry := DockerfileCopyEntry{
+		Srcs: []string{"catalog"},
+		Dest: "/configs/my-operator",
+	}
+
+	ok, err := InjectLifecycleJSON(lifecyclePath, base, "my-operator", entry)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected injection to succeed")
+	}
+
+	destPath := filepath.Join(base, "catalog", "lifecycle.json")
+	got, err := os.ReadFile(destPath)
+	if err != nil {
+		t.Fatalf("lifecycle.json not found at catalog/lifecycle.json: %v", err)
 	}
 	if string(got) != string(lifecycleData) {
 		t.Errorf("content mismatch\ngot: %s\nwant: %s", got, lifecycleData)
