@@ -27,7 +27,7 @@ import (
 // otherwise it preserves the tag so the registry can resolve it.
 func GetAnnotations(ctx context.Context, inspector ImageInspector, imageRef string) (map[string]string, error) {
 	if imageRef == "" {
-		return nil, fmt.Errorf("%w", ErrEmptyImageURL)
+		return nil, ErrEmptyImageURL
 	}
 
 	parsed, err := ParseImageURL(imageRef)
@@ -35,15 +35,7 @@ func GetAnnotations(ctx context.Context, inspector ImageInspector, imageRef stri
 		return nil, err
 	}
 
-	// Prefer digest form when available; otherwise preserve the tag.
-	normalizedRef := parsed.RegistryRepository
-	if parsed.Digest != "" {
-		normalizedRef += "@" + parsed.Digest
-	} else if parsed.Tag != "" {
-		normalizedRef += ":" + parsed.Tag
-	}
-
-	raw, err := inspector.InspectRaw(ctx, normalizedRef)
+	raw, err := inspector.InspectRaw(ctx, normalizeImageRef(parsed))
 	if err != nil {
 		return nil, err
 	}

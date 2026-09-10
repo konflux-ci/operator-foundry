@@ -120,15 +120,7 @@ func (r *RemoteInspector) GetManifests(ctx context.Context, imageRef string) (ma
 		return nil, err
 	}
 
-	// Prefer digest form when available; otherwise preserve the tag.
-	normalizedRef := parsed.RegistryRepository
-	if parsed.Digest != "" {
-		normalizedRef += "@" + parsed.Digest
-	} else if parsed.Tag != "" {
-		normalizedRef += ":" + parsed.Tag
-	}
-
-	ref, err := name.ParseReference(normalizedRef, parseOpts...)
+	ref, err := name.ParseReference(normalizeImageRef(parsed), parseOpts...)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrRawInspectFailed, err)
 	}
@@ -149,6 +141,9 @@ func (r *RemoteInspector) GetManifests(ctx context.Context, imageRef string) (ma
 			return nil, fmt.Errorf("%w: %w", ErrParseRawManifest, err)
 		}
 
+		// NOTE: keyed by architecture only; entries with the same arch but
+		// different OS will overwrite each other. This is acceptable because
+		// all images in this project target Linux exclusively.
 		result := make(map[string]string, len(idxManifest.Manifests))
 		for _, m := range idxManifest.Manifests {
 			if m.Platform != nil {
@@ -159,7 +154,7 @@ func (r *RemoteInspector) GetManifests(ctx context.Context, imageRef string) (ma
 			}
 		}
 		if len(result) == 0 {
-			return nil, fmt.Errorf("%w", ErrNoUsableManifests)
+			return nil, ErrNoUsableManifests
 		}
 		return result, nil
 
@@ -181,7 +176,7 @@ func (r *RemoteInspector) GetManifests(ctx context.Context, imageRef string) (ma
 		arch := strings.ToLower(cf.Architecture)
 		d := digest.String()
 		if arch == "" || d == "" {
-			return nil, fmt.Errorf("%w", ErrMissingArchDigest)
+			return nil, ErrMissingArchDigest
 		}
 		return map[string]string{arch: d}, nil
 	}

@@ -103,7 +103,7 @@ func TestGetAnnotations_NullValue(t *testing.T) {
 	}
 }
 
-// Empty image URL — returns ErrMissingImageURL.
+// Empty image URL — returns ErrEmptyImageURL.
 func TestGetAnnotations_EmptyURL(t *testing.T) {
 	inspector := &mockInspector{}
 

@@ -18,7 +18,6 @@ package image
 
 import (
 	"context"
-	"fmt"
 	"sort"
 )
 
@@ -55,7 +54,7 @@ func GetBaseImage(ctx context.Context, inspector ImageInspector, imageRef string
 
 	baseImageName := annotations[annotationBaseImageName]
 	if baseImageName == "" {
-		return "", fmt.Errorf("%w", ErrBaseImageAnnotationNotFound)
+		return "", ErrBaseImageAnnotationNotFound
 	}
 
 	baseImageDigest := annotations[annotationBaseImageDigest]
@@ -79,7 +78,7 @@ func selectManifestDigest(manifests map[string]string) (string, error) {
 		return digest, nil
 	}
 	if len(manifests) == 0 {
-		return "", fmt.Errorf("%w", ErrManifestDigestNotFound)
+		return "", ErrManifestDigestNotFound
 	}
 	archs := make([]string, 0, len(manifests))
 	for arch := range manifests {
