@@ -27,9 +27,10 @@ func NewFBCCmd() *cobra.Command {
 		},
 	}
 
+	cmd.AddCommand(newCheckLifecycleEligibilityCmd())
+	cmd.AddCommand(newCheckRelatedImagesMediatypeCmd())
 	cmd.AddCommand(newGetPackagesCmd())
 	cmd.AddCommand(newInjectLifecycleCmd())
-	cmd.AddCommand(newCheckLifecycleEligibilityCmd())
 
 	return cmd
 }
