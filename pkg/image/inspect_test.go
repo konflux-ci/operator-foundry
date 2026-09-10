@@ -155,27 +155,27 @@ func TestInspect_HappyPath(t *testing.T) {
 	}
 }
 
-// Invalid reference — verify error wraps ErrInspectImageFailed.
+// Invalid reference — verify error wraps ErrImageFetchFailed.
 func TestInspect_InvalidRef(t *testing.T) {
 	inspector := NewRemoteInspector()
 	_, err := inspector.Inspect(context.Background(), "")
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
-	if !errors.Is(err, ErrInspectImageFailed) {
-		t.Errorf("expected error to wrap ErrInspectImageFailed, got: %v", err)
+	if !errors.Is(err, ErrImageFetchFailed) {
+		t.Errorf("expected error to wrap ErrImageFetchFailed, got: %v", err)
 	}
 }
 
-// Unreachable registry — verify error wraps ErrInspectImageFailed.
+// Unreachable registry — verify error wraps ErrImageFetchFailed.
 func TestInspect_UnreachableRegistry(t *testing.T) {
 	inspector := NewRemoteInspector()
 	_, err := inspector.Inspect(context.Background(), "localhost:1/nonexistent/repo:v1")
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
-	if !errors.Is(err, ErrInspectImageFailed) {
-		t.Errorf("expected error to wrap ErrInspectImageFailed, got: %v", err)
+	if !errors.Is(err, ErrImageFetchFailed) {
+		t.Errorf("expected error to wrap ErrImageFetchFailed, got: %v", err)
 	}
 }
 
@@ -361,6 +361,26 @@ func TestGetManifests_SingleManifestMissingArch(t *testing.T) {
 	}
 	if !errors.Is(err, ErrMissingArchDigest) {
 		t.Errorf("expected error to wrap ErrMissingArchDigest, got: %v", err)
+	}
+}
+
+// Tag-only reference (no digest) — GetManifests must preserve the tag.
+func TestGetManifests_TagOnlyRef(t *testing.T) {
+	base := setupRegistry(t)
+	tagRef := mustParseRef(t, base+"/test/repo:v1")
+	img := buildImage(t, "amd64", nil)
+	imgDigest := pushImage(t, tagRef, img)
+
+	inspector := NewRemoteInspector()
+	got, err := inspector.GetManifests(context.Background(), base+"/test/repo:v1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("got %d entries, want 1", len(got))
+	}
+	if got["amd64"] != imgDigest {
+		t.Errorf("amd64 = %q, want %q", got["amd64"], imgDigest)
 	}
 }
 

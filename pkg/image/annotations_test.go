@@ -111,8 +111,8 @@ func TestGetAnnotations_EmptyURL(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
-	if !errors.Is(err, ErrMissingImageURL) {
-		t.Errorf("expected error to wrap ErrMissingImageURL, got: %v", err)
+	if !errors.Is(err, ErrEmptyImageURL) {
+		t.Errorf("expected error to wrap ErrEmptyImageURL, got: %v", err)
 	}
 }
 

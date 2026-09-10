@@ -26,14 +26,12 @@ var (
 
 // Inspection errors
 var (
-	ErrRawInspectFailed            = errors.New("raw image inspect command failed")
-	ErrImageInspectFailed          = errors.New("image manifest could not be inspected")
+	ErrRawInspectFailed            = errors.New("raw manifest fetch failed")
+	ErrManifestInspectFailed       = errors.New("image manifest could not be inspected")
 	ErrNoUsableManifests           = errors.New("image index contained no usable manifest entries")
-	ErrParseInspectOutput          = errors.New("failed to parse inspect output")
 	ErrMissingArchDigest           = errors.New("image manifest does not have an architecture and digest")
-	ErrInspectImageFailed          = errors.New("failed to inspect the image")
+	ErrImageFetchFailed            = errors.New("failed to fetch image metadata")
 	ErrParseRawManifest            = errors.New("failed to parse raw manifest")
-	ErrMissingImageURL             = errors.New("missing image URL")
 	ErrManifestDigestNotFound      = errors.New("manifest digest not found")
 	ErrBaseImageAnnotationNotFound = errors.New("base image annotation not found")
 )

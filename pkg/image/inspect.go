@@ -67,24 +67,22 @@ func (r *RemoteInspector) withContext(ctx context.Context) []remote.Option {
 func (r *RemoteInspector) Inspect(ctx context.Context, imageRef string) (*InspectResult, error) {
 	ref, err := name.ParseReference(imageRef, parseOpts...)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %s", ErrInspectImageFailed, err)
+		return nil, fmt.Errorf("%w: %w", ErrImageFetchFailed, err)
 	}
 
-	// Fetches the manifest and config blob from the registry.
-	// Equivalent to: skopeo inspect --no-tags docker://<imageRef>
 	img, err := remote.Image(ref, r.withContext(ctx)...)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %s", ErrInspectImageFailed, err)
+		return nil, fmt.Errorf("%w: %w", ErrImageFetchFailed, err)
 	}
 
 	cf, err := img.ConfigFile()
 	if err != nil {
-		return nil, fmt.Errorf("%w: %s", ErrInspectImageFailed, err)
+		return nil, fmt.Errorf("%w: %w", ErrImageFetchFailed, err)
 	}
 
 	digest, err := img.Digest()
 	if err != nil {
-		return nil, fmt.Errorf("%w: %s", ErrInspectImageFailed, err)
+		return nil, fmt.Errorf("%w: %w", ErrImageFetchFailed, err)
 	}
 
 	return &InspectResult{
@@ -102,14 +100,12 @@ func (r *RemoteInspector) Inspect(ctx context.Context, imageRef string) (*Inspec
 func (r *RemoteInspector) InspectRaw(ctx context.Context, imageRef string) (json.RawMessage, error) {
 	ref, err := name.ParseReference(imageRef, parseOpts...)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %s", ErrRawInspectFailed, err)
+		return nil, fmt.Errorf("%w: %w", ErrRawInspectFailed, err)
 	}
 
-	// Fetches the raw manifest from the registry (no config blob resolution).
-	// Equivalent to: skopeo inspect --raw --no-tags docker://<imageRef>
 	desc, err := remote.Get(ref, r.withContext(ctx)...)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %s", ErrRawInspectFailed, err)
+		return nil, fmt.Errorf("%w: %w", ErrRawInspectFailed, err)
 	}
 
 	return json.RawMessage(desc.Manifest), nil
@@ -119,31 +115,38 @@ func (r *RemoteInspector) InspectRaw(ctx context.Context, imageRef string) (json
 // reference. For an OCI image index it returns one entry per platform; for a
 // single-arch manifest it returns one entry keyed by the image's architecture.
 func (r *RemoteInspector) GetManifests(ctx context.Context, imageRef string) (map[string]string, error) {
-	digestRef, err := GetImageRegistryRepositoryDigest(imageRef)
+	parsed, err := ParseImageURL(imageRef)
 	if err != nil {
 		return nil, err
 	}
 
-	ref, err := name.ParseReference(digestRef, parseOpts...)
-	if err != nil {
-		return nil, fmt.Errorf("%w: %s", ErrRawInspectFailed, err)
+	// Prefer digest form when available; otherwise preserve the tag.
+	normalizedRef := parsed.RegistryRepository
+	if parsed.Digest != "" {
+		normalizedRef += "@" + parsed.Digest
+	} else if parsed.Tag != "" {
+		normalizedRef += ":" + parsed.Tag
 	}
 
-	// Fetch the raw manifest. Equivalent to: skopeo inspect --raw --no-tags docker://<digestRef>
+	ref, err := name.ParseReference(normalizedRef, parseOpts...)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrRawInspectFailed, err)
+	}
+
 	desc, err := remote.Get(ref, r.withContext(ctx)...)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %s", ErrRawInspectFailed, err)
+		return nil, fmt.Errorf("%w: %w", ErrRawInspectFailed, err)
 	}
 
 	switch desc.MediaType {
 	case types.OCIImageIndex, types.DockerManifestList: // multi-arch index
 		idx, err := desc.ImageIndex()
 		if err != nil {
-			return nil, fmt.Errorf("%w: %s", ErrParseRawManifest, err)
+			return nil, fmt.Errorf("%w: %w", ErrParseRawManifest, err)
 		}
 		idxManifest, err := idx.IndexManifest()
 		if err != nil {
-			return nil, fmt.Errorf("%w: %s", ErrParseRawManifest, err)
+			return nil, fmt.Errorf("%w: %w", ErrParseRawManifest, err)
 		}
 
 		result := make(map[string]string, len(idxManifest.Manifests))
@@ -164,15 +167,15 @@ func (r *RemoteInspector) GetManifests(ctx context.Context, imageRef string) (ma
 		// single-arch manifest
 		img, err := desc.Image()
 		if err != nil {
-			return nil, fmt.Errorf("%w: %s", ErrImageInspectFailed, err)
+			return nil, fmt.Errorf("%w: %w", ErrManifestInspectFailed, err)
 		}
 		cf, err := img.ConfigFile()
 		if err != nil {
-			return nil, fmt.Errorf("%w: %s", ErrImageInspectFailed, err)
+			return nil, fmt.Errorf("%w: %w", ErrManifestInspectFailed, err)
 		}
 		digest, err := img.Digest()
 		if err != nil {
-			return nil, fmt.Errorf("%w: %s", ErrImageInspectFailed, err)
+			return nil, fmt.Errorf("%w: %w", ErrManifestInspectFailed, err)
 		}
 
 		arch := strings.ToLower(cf.Architecture)

@@ -19,6 +19,7 @@ package image
 import (
 	"context"
 	"fmt"
+	"sort"
 )
 
 const (
@@ -70,14 +71,20 @@ func GetBaseImage(ctx context.Context, inspector ImageInspector, imageRef string
 }
 
 // selectManifestDigest selects a manifest digest from the given map.
-// It prefers amd64 if available, otherwise it returns the first available digest.
-// If the map is empty, it returns ErrManifestDigestNotFound.
+// It prefers amd64 if available, otherwise it picks the first architecture
+// alphabetically for deterministic results. Returns ErrManifestDigestNotFound
+// if the map is empty.
 func selectManifestDigest(manifests map[string]string) (string, error) {
 	if digest, ok := manifests["amd64"]; ok {
 		return digest, nil
 	}
-	for _, digest := range manifests {
-		return digest, nil
+	if len(manifests) == 0 {
+		return "", fmt.Errorf("%w", ErrManifestDigestNotFound)
 	}
-	return "", fmt.Errorf("%w", ErrManifestDigestNotFound)
+	archs := make([]string, 0, len(manifests))
+	for arch := range manifests {
+		archs = append(archs, arch)
+	}
+	sort.Strings(archs)
+	return manifests[archs[0]], nil
 }

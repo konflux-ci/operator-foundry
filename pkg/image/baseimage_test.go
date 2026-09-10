@@ -127,13 +127,44 @@ func TestGetBaseImage_Amd64SelectedFromMultiArch(t *testing.T) {
 	}
 }
 
-// Non-amd64 fallback — uses first available arch when amd64 is absent.
+// Non-amd64 fallback — uses first available arch alphabetically when amd64 is absent.
 func TestGetBaseImage_NonAmd64Fallback(t *testing.T) {
 	expectedManifestRef := "registry.io/repo@" + digestArm64
 
 	inspector := &mockInspector{
 		GetManifestsFn: func(_ context.Context, _ string) (map[string]string, error) {
 			return map[string]string{"arm64": digestArm64}, nil
+		},
+		InspectRawFn: func(_ context.Context, ref string) (json.RawMessage, error) {
+			if ref != expectedManifestRef {
+				t.Errorf("InspectRaw called with %q, want %q", ref, expectedManifestRef)
+			}
+			return json.RawMessage(`{"annotations":{
+				"org.opencontainers.image.base.name":"registry.io/base:v4.17"
+			}}`), nil
+		},
+	}
+
+	got, err := GetBaseImage(context.Background(), inspector, sourceRef)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != "registry.io/base:v4.17" {
+		t.Errorf("got %q, want %q", got, "registry.io/base:v4.17")
+	}
+}
+
+// Multiple non-amd64 archs — selection is deterministic (alphabetical).
+func TestGetBaseImage_MultiNonAmd64Deterministic(t *testing.T) {
+	// "arm64" is alphabetically before "s390x", so arm64 digest should be selected.
+	expectedManifestRef := "registry.io/repo@" + digestArm64
+
+	inspector := &mockInspector{
+		GetManifestsFn: func(_ context.Context, _ string) (map[string]string, error) {
+			return map[string]string{
+				"s390x": digestSingle,
+				"arm64": digestArm64,
+			}, nil
 		},
 		InspectRawFn: func(_ context.Context, ref string) (json.RawMessage, error) {
 			if ref != expectedManifestRef {
