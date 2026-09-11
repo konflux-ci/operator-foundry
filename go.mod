@@ -4,7 +4,7 @@ go 1.26.4
 
 require (
 	github.com/keilerkonzept/dockerfile-json v1.2.2
-	github.com/moby/buildkit v0.30.0
+	github.com/moby/buildkit v0.33.0
 	github.com/spf13/cobra v1.10.2
 	go.podman.io/image/v5 v5.40.0
 	gopkg.in/yaml.v3 v3.0.1
@@ -24,5 +24,5 @@ require (
 	github.com/spf13/pflag v1.0.10 // indirect
 	github.com/tonistiigi/go-csvvalue v0.0.0-20240814133006-030d3b2625d0 // indirect
 	go.podman.io/storage v1.64.0 // indirect
-	google.golang.org/protobuf v1.36.11 // indirect
+	google.golang.org/protobuf v1.36.12 // indirect
 )
