@@ -6,7 +6,7 @@ require (
 	github.com/keilerkonzept/dockerfile-json v1.2.2
 	github.com/moby/buildkit v0.30.0
 	github.com/spf13/cobra v1.10.2
-	go.podman.io/image/v5 v5.40.0
+	go.podman.io/image/v5 v5.41.1
 	gopkg.in/yaml.v3 v3.0.1
 )
 
