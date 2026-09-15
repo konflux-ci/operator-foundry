@@ -27,6 +27,8 @@ import (
 	"github.com/google/go-containerregistry/pkg/name"
 	"github.com/keilerkonzept/dockerfile-json/pkg/dockerfile"
 	"github.com/moby/buildkit/frontend/dockerfile/instructions"
+
+	"github.com/konflux-ci/operator-foundry/pkg/image"
 )
 
 type ocpVersion struct {
@@ -139,7 +141,7 @@ func getOCPVersionFromDockerfileBaseImage(d *dockerfile.Dockerfile, buildArgs ma
 	case name.Digest:
 		// For references with both tag and digest (e.g. image:v4.15@sha256:...),
 		// the library returns a Digest type; extract the tag from the raw string.
-		tag = extractTagBeforeDigest(baseImage)
+		tag = image.ExtractTagBeforeDigest(baseImage)
 	}
 
 	if tag == "" {
@@ -173,25 +175,6 @@ func getFBCLabel(d *dockerfile.Dockerfile, key string) string {
 		}
 	}
 	return ""
-}
-
-// extractTagBeforeDigest extracts the tag from a "repo:tag@digest" reference.
-// Returns "" when no tag is present before the digest separator.
-func extractTagBeforeDigest(ref string) string {
-	atIdx := strings.Index(ref, "@")
-	if atIdx <= 0 {
-		return ""
-	}
-	before := ref[:atIdx]
-	colonIdx := strings.LastIndex(before, ":")
-	if colonIdx <= 0 {
-		return ""
-	}
-	candidate := before[colonIdx+1:]
-	if strings.Contains(candidate, "/") {
-		return ""
-	}
-	return candidate
 }
 
 // ValidateOCPVersion returns an error if the version is not in the expected
