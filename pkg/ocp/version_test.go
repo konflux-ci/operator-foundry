@@ -248,6 +248,16 @@ FROM registry.redhat.io/openshift4/ose-operator-registry-rhel9:v4.15@sha256:abc1
 	}
 }
 
+func TestGetOCPVersionsFromDockerfile_DigestOnlyBaseImage_ReturnsError(t *testing.T) {
+	d := mustParseDockerfile(t, `
+FROM registry.redhat.io/openshift4/ose-operator-registry-rhel9@sha256:abc123def456abc123def456abc123def456abc123def456abc123def456abcd
+`)
+	_, err := GetOCPVersionsFromDockerfile(d, nil)
+	if err == nil {
+		t.Fatal("expected error for digest-only base image (no tag), got nil")
+	}
+}
+
 func TestGetOCPVersionsFromDockerfile_BaseImageTagFromArgDefault_Resolves(t *testing.T) {
 	d := mustParseDockerfile(t, `
 ARG CATALOG_VERSION=v4.15

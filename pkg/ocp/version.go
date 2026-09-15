@@ -26,7 +26,8 @@ import (
 
 	"github.com/keilerkonzept/dockerfile-json/pkg/dockerfile"
 	"github.com/moby/buildkit/frontend/dockerfile/instructions"
-	reference "go.podman.io/image/v5/docker/reference"
+
+	"github.com/konflux-ci/operator-foundry/pkg/image"
 )
 
 type ocpVersion struct {
@@ -127,17 +128,16 @@ func getOCPVersionFromDockerfileBaseImage(d *dockerfile.Dockerfile, buildArgs ma
 
 	slog.Info("extracting OCP version from base image", "image", baseImage)
 
-	ref, err := reference.ParseNormalizedNamed(baseImage)
+	parsed, err := image.ParseImageURL(baseImage)
 	if err != nil {
 		return "", fmt.Errorf("could not parse base image reference %q: %w (if the tag references a build ARG without a usable default, pass its value with --build-arg, or add the com.redhat.fbc.openshift.version label instead)", baseImage, err)
 	}
 
-	if _, ok := ref.(reference.Tagged); !ok {
+	if parsed.Tag == "" {
 		return "", fmt.Errorf("base image %q has no version tag", baseImage)
 	}
 
-	tagged := ref.(reference.Tagged)
-	return tagged.Tag(), nil
+	return parsed.Tag, nil
 }
 
 // getFBCLabel searches the final Dockerfile stage for a LABEL instruction
