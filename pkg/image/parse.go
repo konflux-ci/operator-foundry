@@ -77,7 +77,7 @@ func ParseImageURL(imageURL string) (ParsedImageURL, error) {
 		tag = r.TagStr()
 	case name.Digest:
 		digest = r.DigestStr()
-		tag = extractTagBeforeDigest(imageURL)
+		tag = ExtractTagBeforeDigest(imageURL)
 	}
 
 	if tag == "" {
@@ -107,9 +107,9 @@ func looksFullyQualified(ref string) bool {
 	return strings.ContainsAny(host, ".:") || host == "localhost"
 }
 
-// extractTagBeforeDigest extracts the tag from a "repo:tag@digest" reference.
+// ExtractTagBeforeDigest extracts the tag from a "repo:tag@digest" reference.
 // Returns "" when no tag is present before the digest separator.
-func extractTagBeforeDigest(ref string) string {
+func ExtractTagBeforeDigest(ref string) string {
 	atIdx := strings.Index(ref, "@")
 	if atIdx <= 0 {
 		return ""
