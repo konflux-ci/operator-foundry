@@ -24,9 +24,9 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/google/go-containerregistry/pkg/name"
 	"github.com/keilerkonzept/dockerfile-json/pkg/dockerfile"
 	"github.com/moby/buildkit/frontend/dockerfile/instructions"
-	reference "go.podman.io/image/v5/docker/reference"
 )
 
 type ocpVersion struct {
@@ -127,17 +127,26 @@ func getOCPVersionFromDockerfileBaseImage(d *dockerfile.Dockerfile, buildArgs ma
 
 	slog.Info("extracting OCP version from base image", "image", baseImage)
 
-	ref, err := reference.ParseNormalizedNamed(baseImage)
+	ref, err := name.ParseReference(baseImage, name.WithDefaultTag(""))
 	if err != nil {
 		return "", fmt.Errorf("could not parse base image reference %q: %w (if the tag references a build ARG without a usable default, pass its value with --build-arg, or add the com.redhat.fbc.openshift.version label instead)", baseImage, err)
 	}
 
-	if _, ok := ref.(reference.Tagged); !ok {
+	var tag string
+	switch r := ref.(type) {
+	case name.Tag:
+		tag = r.TagStr()
+	case name.Digest:
+		// For references with both tag and digest (e.g. image:v4.15@sha256:...),
+		// the library returns a Digest type; extract the tag from the raw string.
+		tag = extractTagBeforeDigest(baseImage)
+	}
+
+	if tag == "" {
 		return "", fmt.Errorf("base image %q has no version tag", baseImage)
 	}
 
-	tagged := ref.(reference.Tagged)
-	return tagged.Tag(), nil
+	return tag, nil
 }
 
 // getFBCLabel searches the final Dockerfile stage for a LABEL instruction
@@ -164,6 +173,25 @@ func getFBCLabel(d *dockerfile.Dockerfile, key string) string {
 		}
 	}
 	return ""
+}
+
+// extractTagBeforeDigest extracts the tag from a "repo:tag@digest" reference.
+// Returns "" when no tag is present before the digest separator.
+func extractTagBeforeDigest(ref string) string {
+	atIdx := strings.Index(ref, "@")
+	if atIdx <= 0 {
+		return ""
+	}
+	before := ref[:atIdx]
+	colonIdx := strings.LastIndex(before, ":")
+	if colonIdx <= 0 {
+		return ""
+	}
+	candidate := before[colonIdx+1:]
+	if strings.Contains(candidate, "/") {
+		return ""
+	}
+	return candidate
 }
 
 // ValidateOCPVersion returns an error if the version is not in the expected
