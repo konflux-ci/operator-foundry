@@ -116,16 +116,26 @@ func extractTagBeforeDigest(ref string) string {
 	return candidate
 }
 
-// normalizeImageRef reconstructs an image reference from its parsed components,
-// preferring digest form when available, otherwise preserving the tag.
-func normalizeImageRef(parsed ParsedImageURL) string {
+// resolveRef turns an image reference string into the format that
+// go-containerregistry understands, while rejecting inputs that the
+// library would accept silently but that this project does not allow
+// (short names without a registry domain, a tag combined with a digest).
+func resolveRef(imageRef string) (name.Reference, error) {
+	parsed, err := ParseImageURL(imageRef)
+	if err != nil {
+		return nil, err
+	}
 	ref := parsed.RegistryRepository
 	if parsed.Digest != "" {
 		ref += "@" + parsed.Digest
 	} else if parsed.Tag != "" {
 		ref += ":" + parsed.Tag
 	}
-	return ref
+	r, err := name.ParseReference(ref, parseOpts...)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrInvalidImageReference, err)
+	}
+	return r, nil
 }
 
 // GetImageRegistryAndRepository returns the registry and repository portion of

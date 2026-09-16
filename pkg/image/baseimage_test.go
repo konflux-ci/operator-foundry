@@ -33,7 +33,7 @@ const sourceRef = "registry.io/repo@" + digestRef
 func TestGetBaseImage_HappyPathBothAnnotations(t *testing.T) {
 	manifestRef := "registry.io/repo@" + digestAmd64
 
-	inspector := &mockInspector{
+	inspector := &mockInspector{t: t,
 		GetManifestsFn: func(_ context.Context, _ string) (map[string]string, error) {
 			return map[string]string{"amd64": digestAmd64}, nil
 		},
@@ -60,7 +60,7 @@ func TestGetBaseImage_HappyPathBothAnnotations(t *testing.T) {
 
 // Base name without digest annotation — returns base image as-is.
 func TestGetBaseImage_BaseNameWithoutDigest(t *testing.T) {
-	inspector := &mockInspector{
+	inspector := &mockInspector{t: t,
 		GetManifestsFn: func(_ context.Context, _ string) (map[string]string, error) {
 			return map[string]string{"amd64": digestAmd64}, nil
 		},
@@ -82,7 +82,7 @@ func TestGetBaseImage_BaseNameWithoutDigest(t *testing.T) {
 
 // Missing base name annotation — returns ErrBaseImageAnnotationNotFound.
 func TestGetBaseImage_MissingBaseName(t *testing.T) {
-	inspector := &mockInspector{
+	inspector := &mockInspector{t: t,
 		GetManifestsFn: func(_ context.Context, _ string) (map[string]string, error) {
 			return map[string]string{"amd64": digestAmd64}, nil
 		},
@@ -104,7 +104,7 @@ func TestGetBaseImage_MissingBaseName(t *testing.T) {
 func TestGetBaseImage_Amd64SelectedFromMultiArch(t *testing.T) {
 	expectedManifestRef := "registry.io/repo@" + digestAmd64
 
-	inspector := &mockInspector{
+	inspector := &mockInspector{t: t,
 		GetManifestsFn: func(_ context.Context, _ string) (map[string]string, error) {
 			return map[string]string{"amd64": digestAmd64, "arm64": digestArm64}, nil
 		},
@@ -131,7 +131,7 @@ func TestGetBaseImage_Amd64SelectedFromMultiArch(t *testing.T) {
 func TestGetBaseImage_NonAmd64Fallback(t *testing.T) {
 	expectedManifestRef := "registry.io/repo@" + digestArm64
 
-	inspector := &mockInspector{
+	inspector := &mockInspector{t: t,
 		GetManifestsFn: func(_ context.Context, _ string) (map[string]string, error) {
 			return map[string]string{"arm64": digestArm64}, nil
 		},
@@ -159,7 +159,7 @@ func TestGetBaseImage_MultiNonAmd64Deterministic(t *testing.T) {
 	// "arm64" is alphabetically before "s390x", so arm64 digest should be selected.
 	expectedManifestRef := "registry.io/repo@" + digestArm64
 
-	inspector := &mockInspector{
+	inspector := &mockInspector{t: t,
 		GetManifestsFn: func(_ context.Context, _ string) (map[string]string, error) {
 			return map[string]string{
 				"s390x": digestSingle,
@@ -188,7 +188,7 @@ func TestGetBaseImage_MultiNonAmd64Deterministic(t *testing.T) {
 // Unqualified base image name without digest — rejected consistently.
 // Ensures validation fires even when digest annotation is absent (validation-inconsistency fix).
 func TestGetBaseImage_UnqualifiedBaseNameWithoutDigest(t *testing.T) {
-	inspector := &mockInspector{
+	inspector := &mockInspector{t: t,
 		GetManifestsFn: func(_ context.Context, _ string) (map[string]string, error) {
 			return map[string]string{"amd64": digestAmd64}, nil
 		},
@@ -210,7 +210,7 @@ func TestGetBaseImage_UnqualifiedBaseNameWithoutDigest(t *testing.T) {
 
 // Unqualified base image name with digest — also rejected (consistent validation).
 func TestGetBaseImage_UnqualifiedBaseNameWithDigest(t *testing.T) {
-	inspector := &mockInspector{
+	inspector := &mockInspector{t: t,
 		GetManifestsFn: func(_ context.Context, _ string) (map[string]string, error) {
 			return map[string]string{"amd64": digestAmd64}, nil
 		},
@@ -231,9 +231,32 @@ func TestGetBaseImage_UnqualifiedBaseNameWithDigest(t *testing.T) {
 	}
 }
 
+// Truncated base image digest annotation — rejected as an invalid reference.
+func TestGetBaseImage_TruncatedDigestRejected(t *testing.T) {
+	inspector := &mockInspector{t: t,
+		GetManifestsFn: func(_ context.Context, _ string) (map[string]string, error) {
+			return map[string]string{"amd64": digestAmd64}, nil
+		},
+		InspectRawFn: func(_ context.Context, _ string) (json.RawMessage, error) {
+			return json.RawMessage(`{"annotations":{
+				"org.opencontainers.image.base.name":"registry.io/base:v4.17",
+				"org.opencontainers.image.base.digest":"sha256:ab"
+			}}`), nil
+		},
+	}
+
+	_, err := GetBaseImage(context.Background(), inspector, sourceRef)
+	if err == nil {
+		t.Fatal("expected error for truncated digest, got nil")
+	}
+	if !errors.Is(err, ErrInvalidImageReference) {
+		t.Errorf("expected ErrInvalidImageReference, got: %v", err)
+	}
+}
+
 // GetManifests fails — error propagates.
 func TestGetBaseImage_GetManifestsFails(t *testing.T) {
-	inspector := &mockInspector{
+	inspector := &mockInspector{t: t,
 		GetManifestsFn: func(_ context.Context, _ string) (map[string]string, error) {
 			return nil, fmt.Errorf("network timeout")
 		},
@@ -247,7 +270,7 @@ func TestGetBaseImage_GetManifestsFails(t *testing.T) {
 
 // Empty manifest map — returns ErrManifestDigestNotFound.
 func TestGetBaseImage_EmptyManifestMap(t *testing.T) {
-	inspector := &mockInspector{
+	inspector := &mockInspector{t: t,
 		GetManifestsFn: func(_ context.Context, _ string) (map[string]string, error) {
 			return map[string]string{}, nil
 		},
@@ -264,7 +287,7 @@ func TestGetBaseImage_EmptyManifestMap(t *testing.T) {
 
 // Digest annotation overrides existing digest in base name.
 func TestGetBaseImage_DigestAnnotationOverridesExisting(t *testing.T) {
-	inspector := &mockInspector{
+	inspector := &mockInspector{t: t,
 		GetManifestsFn: func(_ context.Context, _ string) (map[string]string, error) {
 			return map[string]string{"amd64": digestAmd64}, nil
 		},

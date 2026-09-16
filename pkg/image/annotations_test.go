@@ -29,7 +29,7 @@ import (
 // Annotations present — both key-value pairs returned.
 func TestGetAnnotations_Present(t *testing.T) {
 	raw := `{"annotations":{"org.opencontainers.image.base.name":"registry.io/base:v1","custom":"value"}}`
-	inspector := &mockInspector{
+	inspector := &mockInspector{t: t,
 		InspectRawFn: func(_ context.Context, _ string) (json.RawMessage, error) {
 			return json.RawMessage(raw), nil
 		},
@@ -50,7 +50,7 @@ func TestGetAnnotations_Present(t *testing.T) {
 // No annotations field — returns empty map, no error.
 func TestGetAnnotations_NoField(t *testing.T) {
 	raw := `{"schemaVersion":2}`
-	inspector := &mockInspector{
+	inspector := &mockInspector{t: t,
 		InspectRawFn: func(_ context.Context, _ string) (json.RawMessage, error) {
 			return json.RawMessage(raw), nil
 		},
@@ -68,7 +68,7 @@ func TestGetAnnotations_NoField(t *testing.T) {
 // Null annotations value — returns empty map, no error.
 func TestGetAnnotations_NullValue(t *testing.T) {
 	raw := `{"annotations":null}`
-	inspector := &mockInspector{
+	inspector := &mockInspector{t: t,
 		InspectRawFn: func(_ context.Context, _ string) (json.RawMessage, error) {
 			return json.RawMessage(raw), nil
 		},
@@ -85,7 +85,11 @@ func TestGetAnnotations_NullValue(t *testing.T) {
 
 // Empty image URL — returns ErrEmptyImageURL.
 func TestGetAnnotations_EmptyURL(t *testing.T) {
-	inspector := &mockInspector{}
+	inspector := &mockInspector{t: t,
+		InspectRawFn: func(_ context.Context, _ string) (json.RawMessage, error) {
+			return nil, ErrEmptyImageURL
+		},
+	}
 
 	_, err := GetAnnotations(context.Background(), inspector, "")
 	if err == nil {
@@ -100,7 +104,7 @@ func TestGetAnnotations_EmptyURL(t *testing.T) {
 func TestGetAnnotations_TagOnlyRef(t *testing.T) {
 	raw := `{"annotations":{"key":"value"}}`
 	var gotRef string
-	inspector := &mockInspector{
+	inspector := &mockInspector{t: t,
 		InspectRawFn: func(_ context.Context, ref string) (json.RawMessage, error) {
 			gotRef = ref
 			return json.RawMessage(raw), nil
@@ -121,7 +125,7 @@ func TestGetAnnotations_TagOnlyRef(t *testing.T) {
 
 // InspectRaw fails — error propagates with context.
 func TestGetAnnotations_InspectRawFails(t *testing.T) {
-	inspector := &mockInspector{
+	inspector := &mockInspector{t: t,
 		InspectRawFn: func(_ context.Context, _ string) (json.RawMessage, error) {
 			return nil, fmt.Errorf("%w: connection refused", ErrRawInspectFailed)
 		},

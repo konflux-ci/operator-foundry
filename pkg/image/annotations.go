@@ -23,19 +23,8 @@ import (
 )
 
 // GetAnnotations extracts OCI annotations from a raw image manifest.
-// It normalises imageRef to digest form when a digest is present;
-// otherwise it preserves the tag so the registry can resolve it.
 func GetAnnotations(ctx context.Context, inspector ImageInspector, imageRef string) (map[string]string, error) {
-	if imageRef == "" {
-		return nil, ErrEmptyImageURL
-	}
-
-	parsed, err := ParseImageURL(imageRef)
-	if err != nil {
-		return nil, err
-	}
-
-	raw, err := inspector.InspectRaw(ctx, normalizeImageRef(parsed))
+	raw, err := inspector.InspectRaw(ctx, imageRef)
 	if err != nil {
 		return nil, err
 	}

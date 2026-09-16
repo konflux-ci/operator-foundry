@@ -31,15 +31,6 @@ import (
 	"github.com/google/go-containerregistry/pkg/v1/remote"
 )
 
-// Digests used across inspect and dependent test files (annotations, baseimage).
-// Each is exactly 64 hex chars after "sha256:" to satisfy the distribution/reference parser.
-const (
-	digestAmd64  = "sha256:1111111111111111111111111111111111111111111111111111111111111111"
-	digestArm64  = "sha256:2222222222222222222222222222222222222222222222222222222222222222"
-	digestSingle = "sha256:3333333333333333333333333333333333333333333333333333333333333333"
-	digestRef    = "sha256:4444444444444444444444444444444444444444444444444444444444444444"
-)
-
 // ── Test helpers ───────────────────────────────────────────────
 
 // setupRegistry starts an in-memory OCI registry and returns its base URL
@@ -155,15 +146,27 @@ func TestInspect_HappyPath(t *testing.T) {
 	}
 }
 
-// Invalid reference — verify error wraps ErrImageFetchFailed.
+// Empty image reference — verify error wraps ErrEmptyImageURL.
 func TestInspect_InvalidRef(t *testing.T) {
 	inspector := NewRemoteInspector()
 	_, err := inspector.Inspect(context.Background(), "")
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
-	if !errors.Is(err, ErrImageFetchFailed) {
-		t.Errorf("expected error to wrap ErrImageFetchFailed, got: %v", err)
+	if !errors.Is(err, ErrEmptyImageURL) {
+		t.Errorf("expected error to wrap ErrEmptyImageURL, got: %v", err)
+	}
+}
+
+// Unqualified Docker Hub shorthand — verify error wraps ErrInvalidImageReference.
+func TestInspect_UnqualifiedRef(t *testing.T) {
+	inspector := NewRemoteInspector()
+	_, err := inspector.Inspect(context.Background(), "ubuntu:22.04")
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !errors.Is(err, ErrInvalidImageReference) {
+		t.Errorf("expected error to wrap ErrInvalidImageReference, got: %v", err)
 	}
 }
 
@@ -195,6 +198,18 @@ func TestInspectRaw_HappyPath(t *testing.T) {
 	}
 	if len(raw) == 0 {
 		t.Fatal("expected non-empty raw manifest")
+	}
+}
+
+// Unqualified Docker Hub shorthand — verify error wraps ErrInvalidImageReference.
+func TestInspectRaw_UnqualifiedRef(t *testing.T) {
+	inspector := NewRemoteInspector()
+	_, err := inspector.InspectRaw(context.Background(), "ubuntu:22.04")
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !errors.Is(err, ErrInvalidImageReference) {
+		t.Errorf("expected error to wrap ErrInvalidImageReference, got: %v", err)
 	}
 }
 
@@ -449,4 +464,3 @@ func TestGetManifests_TagOnlyRef(t *testing.T) {
 		t.Errorf("amd64 = %q, want %q", got["amd64"], imgDigest)
 	}
 }
-

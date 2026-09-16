@@ -19,17 +19,15 @@ package image
 import (
 	"context"
 	"fmt"
-	"regexp"
 	"sort"
+
+	"github.com/google/go-containerregistry/pkg/v1"
 )
 
 const (
 	annotationBaseImageName   = "org.opencontainers.image.base.name"
 	annotationBaseImageDigest = "org.opencontainers.image.base.digest"
 )
-
-// digestPattern matches the OCI digest format: algorithm:hex.
-var digestPattern = regexp.MustCompile(`^[a-z0-9]+:[a-f0-9]+$`)
 
 // GetBaseImage resolves the base image reference for the given image.
 // It fetches manifests, selects the amd64 architecture (or first available),
@@ -64,7 +62,7 @@ func GetBaseImage(ctx context.Context, inspector ImageInspector, imageRef string
 
 	baseImageDigest := annotations[annotationBaseImageDigest]
 	if baseImageDigest != "" {
-		if !digestPattern.MatchString(baseImageDigest) {
+		if _, err := v1.NewHash(baseImageDigest); err != nil {
 			return "", fmt.Errorf("%w: malformed base image digest annotation %q", ErrInvalidImageReference, baseImageDigest)
 		}
 		baseTag, err := GetImageRegistryRepositoryTag(baseImageName)

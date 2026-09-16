@@ -22,16 +22,15 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/google/go-containerregistry/pkg/name"
 	"github.com/google/go-containerregistry/pkg/v1/remote"
 	"github.com/google/go-containerregistry/pkg/v1/types"
 )
 
 // InspectResult holds parsed metadata from an image inspection.
 type InspectResult struct {
-	Digest       string            `json:"Digest"`
-	Architecture string            `json:"Architecture"`
-	Labels       map[string]string `json:"Labels"`
+	Digest       string            `json:"digest"`
+	Architecture string            `json:"architecture"`
+	Labels       map[string]string `json:"labels"`
 }
 
 // ImageInspector abstracts image registry inspection.
@@ -61,13 +60,13 @@ func (r *RemoteInspector) withContext(ctx context.Context) []remote.Option {
 }
 
 // Inspect fetches image metadata (digest, architecture, labels) for the given
-// image reference. The reference must point to a single image, not an index.
-//
-// Equivalent to: skopeo inspect --no-tags docker://<imageRef>
+// image reference. If the reference points to a multi-arch index, the
+// linux/amd64 child image is selected automatically (the default platform
+// used by go-containerregistry).
 func (r *RemoteInspector) Inspect(ctx context.Context, imageRef string) (*InspectResult, error) {
-	ref, err := name.ParseReference(imageRef, parseOpts...)
+	ref, err := resolveRef(imageRef)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrImageFetchFailed, err)
+		return nil, err
 	}
 
 	img, err := remote.Image(ref, r.withContext(ctx)...)
@@ -95,12 +94,10 @@ func (r *RemoteInspector) Inspect(ctx context.Context, imageRef string) (*Inspec
 // InspectRaw fetches the raw manifest bytes for the given image reference.
 // For an image index this returns the index manifest; for a single image
 // it returns the image manifest.
-//
-// Equivalent to: skopeo inspect --raw --no-tags docker://<imageRef>
 func (r *RemoteInspector) InspectRaw(ctx context.Context, imageRef string) (json.RawMessage, error) {
-	ref, err := name.ParseReference(imageRef, parseOpts...)
+	ref, err := resolveRef(imageRef)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrInvalidImageReference, err)
+		return nil, err
 	}
 
 	desc, err := remote.Get(ref, r.withContext(ctx)...)
@@ -115,14 +112,9 @@ func (r *RemoteInspector) InspectRaw(ctx context.Context, imageRef string) (json
 // reference. For an OCI image index it returns one entry per platform; for a
 // single-arch manifest it returns one entry keyed by the image's architecture.
 func (r *RemoteInspector) GetManifests(ctx context.Context, imageRef string) (map[string]string, error) {
-	parsed, err := ParseImageURL(imageRef)
+	ref, err := resolveRef(imageRef)
 	if err != nil {
 		return nil, err
-	}
-
-	ref, err := name.ParseReference(normalizeImageRef(parsed), parseOpts...)
-	if err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrInvalidImageReference, err)
 	}
 
 	desc, err := remote.Get(ref, r.withContext(ctx)...)
@@ -141,12 +133,9 @@ func (r *RemoteInspector) GetManifests(ctx context.Context, imageRef string) (ma
 			return nil, fmt.Errorf("%w: %w", ErrRawManifestParseFailed, err)
 		}
 
-		// NOTE: keyed by architecture only; entries with the same arch but
-		// different OS will overwrite each other. This is acceptable because
-		// all images in this project target Linux exclusively.
 		result := make(map[string]string, len(idxManifest.Manifests))
 		for _, m := range idxManifest.Manifests {
-			if m.Platform != nil {
+			if m.Platform != nil && strings.EqualFold(m.Platform.OS, "linux") {
 				arch := strings.ToLower(m.Platform.Architecture)
 				if arch != "" {
 					result[arch] = m.Digest.String()
