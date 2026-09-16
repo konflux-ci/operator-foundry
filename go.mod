@@ -1,6 +1,6 @@
 module github.com/konflux-ci/operator-foundry
 
-go 1.26.4
+go 1.26.6
 
 require (
 	github.com/google/go-containerregistry v0.22.1
