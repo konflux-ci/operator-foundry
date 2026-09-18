@@ -2,6 +2,7 @@
 # v4.12–v4.13: RHEL 8 image (no -rhel9 variant available)
 FROM registry.redhat.io/openshift4/ose-operator-registry:v4.12      AS opm-4-12
 FROM registry.redhat.io/openshift4/ose-operator-registry:v4.13      AS opm-4-13
+FROM registry.redhat.io/openshift4/ose-operator-registry:v4.14      AS opm-4-14
 # v4.15+: RHEL 9 image
 FROM registry.redhat.io/openshift4/ose-operator-registry-rhel9:v4.15 AS opm-4-15
 FROM registry.redhat.io/openshift4/ose-operator-registry-rhel9:v4.16 AS opm-4-16
@@ -36,6 +37,7 @@ LABEL \
 
 COPY --from=opm-4-12 /usr/bin/opm /usr/local/bin/opm-v4.12
 COPY --from=opm-4-13 /usr/bin/opm /usr/local/bin/opm-v4.13
+COPY --from=opm-4-14 /usr/bin/opm /usr/local/bin/opm-v4.14
 COPY --from=opm-4-15 /usr/bin/opm /usr/local/bin/opm-v4.15
 COPY --from=opm-4-16 /usr/bin/opm /usr/local/bin/opm-v4.16
 COPY --from=opm-4-17 /usr/bin/opm /usr/local/bin/opm-v4.17
