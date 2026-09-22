@@ -18,7 +18,7 @@ require (
 	github.com/docker/docker-credential-helpers v0.9.9 // indirect
 	github.com/docker/go-units v0.5.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
-	github.com/klauspost/compress v1.19.2 // indirect
+	github.com/klauspost/compress v1.20.0 // indirect
 	github.com/kr/pretty v0.3.1 // indirect
 	github.com/moby/docker-image-spec v1.3.1 // indirect
 	github.com/opencontainers/go-digest v1.0.0 // indirect
