@@ -7,7 +7,7 @@ require (
 	github.com/keilerkonzept/dockerfile-json v1.2.2
 	github.com/moby/buildkit v0.33.0
 	github.com/spf13/cobra v1.10.2
-	golang.org/x/sync v0.22.0
+	golang.org/x/sync v0.23.0
 	gopkg.in/yaml.v3 v3.0.1
 )
 
