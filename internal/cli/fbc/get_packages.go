@@ -30,6 +30,7 @@ func newGetPackagesCmd() *cobra.Command {
 	var buildContextPath string
 	var outputFile string
 	var buildArgFlags []string
+	var skipPackages string
 
 	cmd := &cobra.Command{
 		Use:   "get-packages",
@@ -51,9 +52,26 @@ it can resolve to the same path the image is actually built with.`,
 			if err != nil {
 				return err
 			}
+
+			if skipPackages != "" {
+				parts := strings.Split(skipPackages, ",")
+				var skipList []string
+				for _, s := range parts {
+					s = strings.TrimSpace(s)
+					if s != "" {
+						skipList = append(skipList, s)
+					}
+				}
+				packages = lifecycle.FilterPackages(packages, skipList)
+			}
+
 			output := strings.Join(packages, ",")
 			if outputFile != "" {
-				if err := os.WriteFile(outputFile, []byte(output+"\n"), 0644); err != nil {
+				var content []byte
+				if len(packages) > 0 {
+					content = []byte(output + "\n")
+				}
+				if err := os.WriteFile(outputFile, content, 0644); err != nil {
 					return err
 				}
 			} else if len(packages) > 0 {
@@ -67,6 +85,7 @@ it can resolve to the same path the image is actually built with.`,
 	cmd.Flags().StringVar(&buildContextPath, "build-context", "", "Path to the build context directory (required)")
 	cmd.Flags().StringVar(&outputFile, "output", "", "Path to write package names (default: stdout)")
 	cmd.Flags().StringArrayVar(&buildArgFlags, "build-arg", nil, "Build arg used to resolve ARG references in COPY/ADD source paths, as KEY=VALUE (may be repeated)")
+	cmd.Flags().StringVar(&skipPackages, "skip-packages", "", "Comma-separated list of package names to exclude from the output")
 
 	for _, flag := range []string{"dockerfile", "build-context"} {
 		if err := cmd.MarkFlagRequired(flag); err != nil {

@@ -18,6 +18,7 @@ package lifecycle
 
 import (
 	"fmt"
+	"log/slog"
 
 	"github.com/keilerkonzept/dockerfile-json/pkg/dockerfile"
 )
@@ -44,4 +45,25 @@ func GetPackages(dockerfilePath, buildContextPath string, buildArgs map[string]s
 	}
 
 	return ExtractPackageNames(entries, buildContextPath)
+}
+
+// FilterPackages removes any packages present in the skip list
+// and returns the remainder. Returns nil if all are filtered.
+func FilterPackages(packages, skipList []string) []string {
+	if len(skipList) == 0 {
+		return packages
+	}
+	skip := make(map[string]bool, len(skipList))
+	for _, s := range skipList {
+		skip[s] = true
+	}
+	var filtered []string
+	for _, pkg := range packages {
+		if skip[pkg] {
+			slog.Info("skipping package", "package", pkg)
+		} else {
+			filtered = append(filtered, pkg)
+		}
+	}
+	return filtered
 }
