@@ -162,3 +162,90 @@ COPY ./catalog /configs/my-operator
 		t.Errorf("got %v, want [my-operator]", packages)
 	}
 }
+
+func TestFilterPackages_PartialFiltering(t *testing.T) {
+	packages := []string{"operator-a", "operator-b", "operator-c"}
+	skipList := []string{"operator-b"}
+
+	result := FilterPackages(packages, skipList)
+	if len(result) != 2 {
+		t.Fatalf("got %d packages, want 2: %v", len(result), result)
+	}
+	if result[0] != "operator-a" || result[1] != "operator-c" {
+		t.Errorf("got %v, want [operator-a operator-c]", result)
+	}
+}
+
+func TestFilterPackages_AllFiltered(t *testing.T) {
+	packages := []string{"operator-a", "operator-b"}
+	skipList := []string{"operator-a", "operator-b"}
+
+	result := FilterPackages(packages, skipList)
+	if len(result) != 0 {
+		t.Errorf("got %v, want nil/empty", result)
+	}
+}
+
+func TestFilterPackages_NoneFiltered(t *testing.T) {
+	packages := []string{"operator-a", "operator-b"}
+	skipList := []string{"operator-c"}
+
+	result := FilterPackages(packages, skipList)
+	if len(result) != 2 {
+		t.Fatalf("got %d packages, want 2: %v", len(result), result)
+	}
+	if result[0] != "operator-a" || result[1] != "operator-b" {
+		t.Errorf("got %v, want [operator-a operator-b]", result)
+	}
+}
+
+func TestFilterPackages_EmptySkipList(t *testing.T) {
+	packages := []string{"operator-a", "operator-b"}
+
+	result := FilterPackages(packages, []string{})
+	if len(result) != 2 {
+		t.Fatalf("got %d packages, want 2: %v", len(result), result)
+	}
+	if result[0] != "operator-a" || result[1] != "operator-b" {
+		t.Errorf("got %v, want [operator-a operator-b]", result)
+	}
+}
+
+func TestFilterPackages_NilSkipList(t *testing.T) {
+	packages := []string{"operator-a", "operator-b"}
+
+	result := FilterPackages(packages, nil)
+	if len(result) != 2 {
+		t.Fatalf("got %d packages, want 2: %v", len(result), result)
+	}
+	if result[0] != "operator-a" || result[1] != "operator-b" {
+		t.Errorf("got %v, want [operator-a operator-b]", result)
+	}
+}
+
+func TestFilterPackages_EmptyPackages(t *testing.T) {
+	result := FilterPackages([]string{}, []string{"operator-a"})
+	if len(result) != 0 {
+		t.Errorf("got %v, want nil/empty", result)
+	}
+}
+
+func TestFilterPackages_NilPackages(t *testing.T) {
+	result := FilterPackages(nil, []string{"operator-a"})
+	if len(result) != 0 {
+		t.Errorf("got %v, want nil/empty", result)
+	}
+}
+
+func TestFilterPackages_MultipleSkipEntries(t *testing.T) {
+	packages := []string{"operator-a", "operator-b", "operator-c", "operator-d"}
+	skipList := []string{"operator-a", "operator-c"}
+
+	result := FilterPackages(packages, skipList)
+	if len(result) != 2 {
+		t.Fatalf("got %d packages, want 2: %v", len(result), result)
+	}
+	if result[0] != "operator-b" || result[1] != "operator-d" {
+		t.Errorf("got %v, want [operator-b operator-d]", result)
+	}
+}

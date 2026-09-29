@@ -82,6 +82,7 @@ operator-foundry fbc get-packages \
   --dockerfile <path-to-Dockerfile> \
   --build-context <path-to-build-context> \
   [--build-arg KEY=VALUE]... \
+  [--skip-packages <comma-separated-names>] \
   [--output <path-to-output-file>]
 ```
 
@@ -90,6 +91,8 @@ operator-foundry fbc get-packages \
 | Dockerfile cannot be parsed | Exits with error |
 | No `COPY`/`ADD` targeting `/configs` found | Exits with error |
 | No packages found in catalog directories | Exits with error |
+| All packages filtered by `--skip-packages` (with `--output`) | Writes empty (0-byte) output file, exit 0 |
+| All packages filtered by `--skip-packages` (without `--output`) | No stdout output, exit 0 |
 
 ### `fbc inject-lifecycle`
 
