@@ -31,6 +31,7 @@ func newGetPackagesCmd() *cobra.Command {
 	var outputFile string
 	var buildArgFlags []string
 	var skipPackages string
+	var allFilteredMarker string
 
 	cmd := &cobra.Command{
 		Use:   "get-packages",
@@ -43,6 +44,10 @@ If a COPY/ADD source path references a build ARG (e.g.
 COPY ./${INPUT_DIR}/ /configs/my-operator), pass its value with --build-arg so
 it can resolve to the same path the image is actually built with.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if allFilteredMarker != "" && skipPackages == "" {
+				return fmt.Errorf("--all-filtered-marker requires --skip-packages")
+			}
+
 			buildArgs, err := parseBuildArgs(buildArgFlags)
 			if err != nil {
 				return err
@@ -52,6 +57,8 @@ it can resolve to the same path the image is actually built with.`,
 			if err != nil {
 				return err
 			}
+
+			preFilterCount := len(packages)
 
 			if skipPackages != "" {
 				parts := strings.Split(skipPackages, ",")
@@ -77,6 +84,12 @@ it can resolve to the same path the image is actually built with.`,
 			} else if len(packages) > 0 {
 				fmt.Println(output)
 			}
+
+			if allFilteredMarker != "" && preFilterCount > 0 && len(packages) == 0 {
+				if err := os.WriteFile(allFilteredMarker, nil, 0644); err != nil {
+					return err
+				}
+			}
 			return nil
 		},
 	}
@@ -86,6 +99,7 @@ it can resolve to the same path the image is actually built with.`,
 	cmd.Flags().StringVar(&outputFile, "output", "", "Path to write package names (default: stdout)")
 	cmd.Flags().StringArrayVar(&buildArgFlags, "build-arg", nil, "Build arg used to resolve ARG references in COPY/ADD source paths, as KEY=VALUE (may be repeated)")
 	cmd.Flags().StringVar(&skipPackages, "skip-packages", "", "Comma-separated list of package names to exclude from the output")
+	cmd.Flags().StringVar(&allFilteredMarker, "all-filtered-marker", "", "Path to write a marker file when packages were discovered but all were filtered by --skip-packages")
 
 	for _, flag := range []string{"dockerfile", "build-context"} {
 		if err := cmd.MarkFlagRequired(flag); err != nil {

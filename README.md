@@ -83,8 +83,11 @@ operator-foundry fbc get-packages \
   --build-context <path-to-build-context> \
   [--build-arg KEY=VALUE]... \
   [--skip-packages <comma-separated-names>] \
+  [--all-filtered-marker <path-to-marker-file>] \
   [--output <path-to-output-file>]
 ```
+
+> **Note:** `--all-filtered-marker` requires `--skip-packages`.
 
 | Scenario | Behavior |
 |---|---|
@@ -93,6 +96,8 @@ operator-foundry fbc get-packages \
 | No packages found in catalog directories | Exits with error |
 | All packages filtered by `--skip-packages` (with `--output`) | Writes empty (0-byte) output file, exit 0 |
 | All packages filtered by `--skip-packages` (without `--output`) | No stdout output, exit 0 |
+| All packages filtered by `--skip-packages` (with `--all-filtered-marker`) | Writes marker file (empty, 0-byte), exit 0 |
+| `--all-filtered-marker` without `--skip-packages` | Exits with error |
 
 ### `fbc inject-lifecycle`
 
