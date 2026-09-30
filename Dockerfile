@@ -12,7 +12,7 @@ FROM registry.redhat.io/openshift4/ose-operator-registry-rhel9:v4.19 AS opm-4-19
 FROM registry.redhat.io/openshift4/ose-operator-registry-rhel9:v4.20 AS opm-4-20
 FROM registry.redhat.io/openshift4/ose-operator-registry-rhel9:v4.21 AS opm-4-21
 FROM registry.redhat.io/openshift4/ose-operator-registry-rhel9:v4.22 AS opm-4-22
-FROM registry.redhat.io/openshift5/ose-operator-registry-rhel9:v5.0  AS opm-5-0
+FROM registry.redhat.io/openshift5/ose-operator-registry-rhel9:v5.1.0  AS opm-5-0
 
 FROM registry.access.redhat.com/ubi9/go-toolset:9.8-1789040808 AS builder
 
