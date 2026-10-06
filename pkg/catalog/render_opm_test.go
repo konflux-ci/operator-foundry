@@ -33,9 +33,7 @@ import (
 )
 
 const (
-	testDirectoryMode  = 0755
 	testExecutableMode = 0700
-	testFileMode       = 0600
 	testImage          = "quay.io/example/index:v1"
 	testDigest         = "sha256:1111111111111111111111111111111111111111111111111111111111111111"
 	testPayload        = "{\"schema\":\"olm.package\",\"name\":\"example\"}\n"
@@ -105,6 +103,28 @@ func TestRenderOPM_CacheHit(t *testing.T) {
 		t.Fatalf("result path = %q, want %q", got, want)
 	}
 	assertContents(t, got, "previous successful render")
+	runner.assertCalls(t)
+	assertFiles(t, cacheDir, want)
+}
+
+// Invalid retry settings are rejected even when a rendered catalog already exists in cache.
+// 1. Create a cached result and configure an invalid retry count.
+// 2. Call renderOPM for the same image.
+// 3. Verify the invalid setting is reported, the runner was not invoked, and the cache is unchanged.
+func TestRenderOPM_CacheHitRejectsInvalidRetrySettings(t *testing.T) {
+	runner := &fakeRunner{failOnCall: true}
+	cacheDir := t.TempDir()
+	want := imageCatalogPath(cacheDir)
+	writeTestFile(t, want, "previous successful render", testFileMode)
+
+	got, err := renderOPM(t.Context(), testImage, cacheDir, Config{RetryCount: -1}, runner)
+	if err == nil || got != "" {
+		t.Fatalf("cache hit with invalid retry settings = (%q, %v), want empty path and error", got, err)
+	}
+	if !errors.Is(err, ErrInvalidRetryCount) {
+		t.Errorf("configuration error = %v, want %v", err, ErrInvalidRetryCount)
+	}
+	assertContents(t, want, "previous successful render")
 	runner.assertCalls(t)
 	assertFiles(t, cacheDir, want)
 }
@@ -695,17 +715,6 @@ func (r *fakeRunner) assertCalls(t *testing.T, want ...string) {
 // imageCatalogPath returns the expected cached catalog path for testImage.
 func imageCatalogPath(cacheDir string) string {
 	return filepath.Join(cacheDir, filepath.FromSlash(testRepositoryCachePath), "_refs", "tagged-base32", "oyyq", "no-digest", "catalog")
-}
-
-// writeTestFile creates parent directories and writes a file with the given contents and permissions.
-func writeTestFile(t *testing.T, path, contents string, mode fs.FileMode) {
-	t.Helper()
-	if err := os.MkdirAll(filepath.Dir(path), testDirectoryMode); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(path, []byte(contents), mode); err != nil {
-		t.Fatal(err)
-	}
 }
 
 // assertContents checks that a file contains exactly the expected text.
