@@ -1,0 +1,76 @@
+{
+    "schema": "olm.package",
+    "name": "zeta",
+    "defaultChannel": "stable"
+}
+{
+    "schema": "olm.channel",
+    "package": "zeta",
+    "name": "stable",
+    "entries": [
+        {
+            "name": "zeta.v2.0.0",
+            "replaces": "zeta.v1.0.0"
+        },
+        {
+            "name": "zeta.v1.0.0"
+        }
+    ]
+}
+{
+    "schema": "olm.deprecations",
+    "package": "zeta",
+    "entries": [
+        {
+            "reference": {
+                "schema": "olm.bundle",
+                "name": "zeta.v1.0.0"
+            },
+            "message": "Deprecated bundle"
+        }
+    ]
+}
+{
+    "schema": "olm.bundle",
+    "name": "zeta.v1.0.0",
+    "package": "zeta",
+    "image": "registry.example/zeta-bundle:1.0.0",
+    "properties": [
+        {
+            "type": "olm.package",
+            "value": {
+                "packageName": "zeta",
+                "version": "1.0.0"
+            }
+        }
+    ],
+    "relatedImages": [
+        {
+            "image": "registry.example/zeta-operator:1.0.0"
+        }
+    ]
+}
+{
+    "schema": "olm.bundle",
+    "name": "zeta.v2.0.0",
+    "package": "zeta",
+    "image": "registry.example/zeta-bundle:2.0.0",
+    "properties": [
+        {
+            "type": "olm.package",
+            "value": {
+                "packageName": "zeta",
+                "version": "2.0.0"
+            }
+        },
+        {
+            "type": "olm.deprecated",
+            "value": {}
+        }
+    ],
+    "relatedImages": [
+        {
+            "image": "registry.example/zeta-operator:2.0.0"
+        }
+    ]
+}

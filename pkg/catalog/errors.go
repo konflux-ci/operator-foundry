@@ -19,6 +19,8 @@ package catalog
 import "errors"
 
 var (
+	// ErrEmptyPackageName is returned when a bundle or related image query has no package name.
+	ErrEmptyPackageName = errors.New("FBC catalog package name is empty")
 	// ErrEmptyTarget is returned when the render target is empty.
 	ErrEmptyTarget = errors.New("render target is empty")
 	// ErrEmptyOPMPath is returned when the OPM binary path is empty.

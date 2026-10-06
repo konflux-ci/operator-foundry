@@ -32,9 +32,7 @@ import (
 )
 
 const (
-	testDirectoryMode  = 0755
 	testExecutableMode = 0700
-	testFileMode       = 0600
 	testImage          = "quay.io/example/index:v1"
 	testDigest         = "sha256:1111111111111111111111111111111111111111111111111111111111111111"
 	testPayload        = "{\"schema\":\"olm.package\",\"name\":\"example\"}\n"
@@ -736,7 +734,7 @@ type mockOPM struct{ path, state string }
 func newMockOPM(t *testing.T) mockOPM {
 	t.Helper()
 	state := t.TempDir()
-	script, err := os.ReadFile("testdata/mock_opm.sh")
+	script, err := os.ReadFile("testdata/render_opm/mock_opm.sh")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -790,16 +788,6 @@ func TestMockOPM_EmptyCallsFile(t *testing.T) {
 
 func imageCatalogPath(cacheDir string) string {
 	return filepath.Join(cacheDir, filepath.FromSlash(testRepositoryCachePath), "_refs", "tagged-base32", "oyyq", "no-digest", "catalog")
-}
-
-func writeTestFile(t *testing.T, path, contents string, mode fs.FileMode) {
-	t.Helper()
-	if err := os.MkdirAll(filepath.Dir(path), testDirectoryMode); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(path, []byte(contents), mode); err != nil {
-		t.Fatal(err)
-	}
 }
 
 func assertContents(t *testing.T, path, want string) {
