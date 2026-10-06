@@ -74,13 +74,14 @@ func TestDoInvalidSettings(t *testing.T) {
 	for _, tc := range []struct {
 		retries  int
 		interval time.Duration
-	}{{-1, 0}, {0, -time.Second}} {
+		wantErr  error
+	}{{-1, 0, ErrInvalidRetryCount}, {0, -time.Second, ErrInvalidRetryInterval}} {
 		err := Do(t.Context(), tc.retries, tc.interval, func(context.Context) (bool, error) {
 			t.Fatal("operation called with invalid settings")
 			return false, nil
 		})
-		if err == nil {
-			t.Fatal("expected invalid settings error")
+		if !errors.Is(err, tc.wantErr) {
+			t.Fatalf("Do = %v, want %v", err, tc.wantErr)
 		}
 	}
 }

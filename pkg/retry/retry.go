@@ -20,8 +20,28 @@ package retry
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 )
+
+// Argument validation errors.
+var (
+	// ErrInvalidRetryCount is returned when the retry count is negative.
+	ErrInvalidRetryCount = errors.New("retry count is invalid")
+	// ErrInvalidRetryInterval is returned when the retry interval is negative.
+	ErrInvalidRetryInterval = errors.New("retry interval is invalid")
+)
+
+// Validate checks retry settings without running an operation.
+func Validate(retries int, interval time.Duration) error {
+	if retries < 0 {
+		return fmt.Errorf("retries must be non-negative: %w", ErrInvalidRetryCount)
+	}
+	if interval < 0 {
+		return fmt.Errorf("interval must be non-negative: %w", ErrInvalidRetryInterval)
+	}
+	return nil
+}
 
 // Do calls operation once and retries failures up to retries times, waiting
 // interval between attempts. Both settings must be non-negative.
@@ -33,11 +53,8 @@ func Do(ctx context.Context, retries int, interval time.Duration, operation func
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if retries < 0 {
-		return errors.New("retries must be non-negative")
-	}
-	if interval < 0 {
-		return errors.New("interval must be non-negative")
+	if err := Validate(retries, interval); err != nil {
+		return err
 	}
 	for attempt := 0; ; attempt++ {
 		if err := ctx.Err(); err != nil {

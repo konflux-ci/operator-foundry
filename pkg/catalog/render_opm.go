@@ -119,13 +119,6 @@ func renderOPM(ctx context.Context, target, cacheDir string, cfg Config, runner 
 		return "", ErrEmptyCacheDir
 	}
 
-	if cfg.RetryCount < 0 {
-		return "", fmt.Errorf("%w: invalid OPM retry settings: RetryCount must be non-negative", ErrInvalidRetryCount)
-	}
-	if cfg.RetryInterval < 0 {
-		return "", fmt.Errorf("%w: invalid OPM retry settings: RetryInterval must be non-negative", ErrInvalidRetryInterval)
-	}
-
 	ref, err := image.ParseImageURL(target)
 	if err != nil {
 		return "", fmt.Errorf("failed to parse image reference: %w", err)
@@ -165,6 +158,12 @@ func renderOPM(ctx context.Context, target, cacheDir string, cfg Config, runner 
 	if err := retry.Do(ctx, cfg.RetryCount, cfg.RetryInterval, func(ctx context.Context) (shouldRetry bool, err error) {
 		return runOPM(ctx, target, runner, output)
 	}); err != nil {
+		if errors.Is(err, retry.ErrInvalidRetryCount) {
+			return "", fmt.Errorf("invalid OPM retry settings for RetryCount: %w", err)
+		}
+		if errors.Is(err, retry.ErrInvalidRetryInterval) {
+			return "", fmt.Errorf("invalid OPM retry settings for RetryInterval: %w", err)
+		}
 		return "", fmt.Errorf("failed to render catalog: %w", err)
 	}
 	if err := output.Close(); err != nil {
