@@ -33,9 +33,7 @@ import (
 )
 
 const (
-	testDirectoryMode  = 0755
 	testExecutableMode = 0700
-	testFileMode       = 0600
 	testImage          = "quay.io/example/index:v1"
 	testDigest         = "sha256:1111111111111111111111111111111111111111111111111111111111111111"
 	testPayload        = "{\"schema\":\"olm.package\",\"name\":\"example\"}\n"
@@ -695,17 +693,6 @@ func (r *fakeRunner) assertCalls(t *testing.T, want ...string) {
 // imageCatalogPath returns the expected cached catalog path for testImage.
 func imageCatalogPath(cacheDir string) string {
 	return filepath.Join(cacheDir, filepath.FromSlash(testRepositoryCachePath), "_refs", "tagged-base32", "oyyq", "no-digest", "catalog")
-}
-
-// writeTestFile creates parent directories and writes a file with the given contents and permissions.
-func writeTestFile(t *testing.T, path, contents string, mode fs.FileMode) {
-	t.Helper()
-	if err := os.MkdirAll(filepath.Dir(path), testDirectoryMode); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(path, []byte(contents), mode); err != nil {
-		t.Fatal(err)
-	}
 }
 
 // assertContents checks that a file contains exactly the expected text.

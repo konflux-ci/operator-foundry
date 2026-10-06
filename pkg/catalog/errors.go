@@ -16,10 +16,16 @@ limitations under the License.
 
 package catalog
 
-import "errors"
+import (
+	"errors"
+
+	"github.com/konflux-ci/operator-foundry/pkg/retry"
+)
 
 // Argument validation errors
 var (
+	// ErrEmptyPackageName is returned when a bundle or related image query has no package name.
+	ErrEmptyPackageName = errors.New("FBC catalog package name is empty")
 	// ErrEmptyTarget is returned when the render target is empty.
 	ErrEmptyTarget = errors.New("render target is empty")
 	// ErrEmptyOPMPath is returned when the OPM binary path is empty.
@@ -27,9 +33,9 @@ var (
 	// ErrEmptyCacheDir is returned when the cache directory is empty.
 	ErrEmptyCacheDir = errors.New("cache directory is empty")
 	// ErrInvalidRetryCount is returned when the retry count is negative.
-	ErrInvalidRetryCount = errors.New("retry count is invalid")
+	ErrInvalidRetryCount = retry.ErrInvalidRetryCount
 	// ErrInvalidRetryInterval is returned when the retry interval is negative.
-	ErrInvalidRetryInterval = errors.New("retry interval is invalid")
+	ErrInvalidRetryInterval = retry.ErrInvalidRetryInterval
 )
 
 // Render errors
