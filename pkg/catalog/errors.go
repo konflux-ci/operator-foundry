@@ -16,11 +16,7 @@ limitations under the License.
 
 package catalog
 
-import (
-	"errors"
-
-	"github.com/konflux-ci/operator-foundry/pkg/retry"
-)
+import "errors"
 
 // Argument validation errors
 var (
@@ -41,9 +37,9 @@ var (
 	// ErrEmptyCacheDir is returned when the cache directory is empty.
 	ErrEmptyCacheDir = errors.New("cache directory is empty")
 	// ErrInvalidRetryCount is returned when the retry count is negative.
-	ErrInvalidRetryCount = retry.ErrInvalidRetryCount
+	ErrInvalidRetryCount = errors.New("retry count is invalid")
 	// ErrInvalidRetryInterval is returned when the retry interval is negative.
-	ErrInvalidRetryInterval = retry.ErrInvalidRetryInterval
+	ErrInvalidRetryInterval = errors.New("retry interval is invalid")
 )
 
 // Render errors
