@@ -153,8 +153,11 @@ func renderOPM(ctx context.Context, target, cacheDir string, cfg Config, runner 
 	if err != nil {
 		return "", fmt.Errorf("failed to create temporary output: %w", err)
 	}
+	outputClosed := false
 	defer func() {
-		_ = output.Close()
+		if !outputClosed {
+			_ = output.Close()
+		}
 		_ = os.Remove(output.Name())
 	}()
 
@@ -166,6 +169,7 @@ func renderOPM(ctx context.Context, target, cacheDir string, cfg Config, runner 
 	if err := output.Close(); err != nil {
 		return "", fmt.Errorf("failed to close output: %w", err)
 	}
+	outputClosed = true
 	if rendered, err := os.Stat(output.Name()); err != nil {
 		return "", fmt.Errorf("failed to inspect rendered output: %w", err)
 	} else if rendered.Size() == 0 {

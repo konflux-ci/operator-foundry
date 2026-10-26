@@ -26,6 +26,14 @@ import (
 var (
 	// ErrEmptyPackageName is returned when a bundle or related image query has no package name.
 	ErrEmptyPackageName = errors.New("FBC catalog package name is empty")
+	// ErrEmptyFBCFragment is returned when an FBC fragment image reference is empty.
+	ErrEmptyFBCFragment = errors.New("FBC fragment image is empty")
+	// ErrEmptyIndexImage is returned when an index image reference is empty.
+	ErrEmptyIndexImage = errors.New("index image is empty")
+	// ErrNilOCPVersionResolver is returned when no OCP version resolver is provided.
+	ErrNilOCPVersionResolver = errors.New("OCP version resolver is nil")
+	// ErrEmptyOCPVersions is returned when no OCP versions are resolved for an FBC fragment.
+	ErrEmptyOCPVersions = errors.New("OCP versions are empty")
 	// ErrEmptyTarget is returned when the render target is empty.
 	ErrEmptyTarget = errors.New("render target is empty")
 	// ErrEmptyOPMPath is returned when the OPM binary path is empty.
