@@ -39,7 +39,9 @@ const (
 	testImage          = "quay.io/example/index:v1"
 	testDigest         = "sha256:1111111111111111111111111111111111111111111111111111111111111111"
 	testPayload        = "{\"schema\":\"olm.package\",\"name\":\"example\"}\n"
+	testOPMVersion     = "opm-test-version"
 	// Expected SHA-256 cache prefixes for quay.io/example/index and localhost:5000/example/index.
+	testOPMVersionCachePath   = "opm-versions-sha256/2194255dd61adadbe639ede7bf86c1fede13e9b5a653be88100ef7cf92ae0482"
 	testRepositoryCachePath   = "repositories-sha256/c43e683059d2605481b2596467e290717b14752a7ee70163b6f8ea1aff2096fd"
 	testRegistryPortCachePath = "repositories-sha256/047cf8f3e5a55f861244b86ca83cb199a41e3e8c36b464848c4f8e4db0f9b6cb"
 
@@ -53,7 +55,7 @@ const (
 // 2. Call renderOPM with a fake runner.
 // 3. Verify one runner call and the expected contents at the correct cache path, with no extra files.
 //
-// Cache paths share the prefix <cacheDir>/repositories-sha256/<repository-hash>/_refs/:
+// Cache paths share the prefix <cacheDir>/opm-versions-sha256/<opm-version-hash>/repositories-sha256/<repository-hash>/_refs/:
 //   - No tag or digest: untagged/no-digest/catalog
 //   - Tag only: tagged-base32/<encoded-tag>/no-digest/catalog
 //   - Digest only: untagged/digest/<digest>/catalog
@@ -62,11 +64,11 @@ func TestRenderOPM_CacheMiss(t *testing.T) {
 	cases := []struct {
 		name, target, relativePath string
 	}{
-		{"untagged", "quay.io/example/index", testRepositoryCachePath + "/_refs/untagged/no-digest/catalog"},
-		{"tag", testImage, testRepositoryCachePath + "/_refs/tagged-base32/oyyq/no-digest/catalog"},
-		{"digest", "quay.io/example/index@" + testDigest, testRepositoryCachePath + "/_refs/untagged/digest/" + testDigest + "/catalog"},
-		{"tag and digest", testImage + "@" + testDigest, testRepositoryCachePath + "/_refs/tagged-base32/oyyq/digest/" + testDigest + "/catalog"},
-		{"registry port", "localhost:5000/example/index:v1", testRegistryPortCachePath + "/_refs/tagged-base32/oyyq/no-digest/catalog"},
+		{"untagged", "quay.io/example/index", testOPMVersionCachePath + "/" + testRepositoryCachePath + "/_refs/untagged/no-digest/catalog"},
+		{"tag", testImage, testOPMVersionCachePath + "/" + testRepositoryCachePath + "/_refs/tagged-base32/oyyq/no-digest/catalog"},
+		{"digest", "quay.io/example/index@" + testDigest, testOPMVersionCachePath + "/" + testRepositoryCachePath + "/_refs/untagged/digest/" + testDigest + "/catalog"},
+		{"tag and digest", testImage + "@" + testDigest, testOPMVersionCachePath + "/" + testRepositoryCachePath + "/_refs/tagged-base32/oyyq/digest/" + testDigest + "/catalog"},
+		{"registry port", "localhost:5000/example/index:v1", testOPMVersionCachePath + "/" + testRegistryPortCachePath + "/_refs/tagged-base32/oyyq/no-digest/catalog"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -87,10 +89,10 @@ func TestRenderOPM_CacheMiss(t *testing.T) {
 	}
 }
 
-// An existing cached result is returned unchanged without invoking the runner or creating extra files.
-// 1. Create a cached result and configure the fake runner to fail if invoked.
+// An existing cached result is returned unchanged without rendering or creating extra files.
+// 1. Create a cached result and configure the fake runner to fail if render is invoked.
 // 2. Call renderOPM for the same image.
-// 3. Verify the existing result is unchanged, the runner was not invoked, and no extra files appeared.
+// 3. Verify the existing result is unchanged, render was not invoked, and no extra files appeared.
 func TestRenderOPM_CacheHit(t *testing.T) {
 	runner := &fakeRunner{failOnCall: true}
 	cacheDir := t.TempDir()
@@ -109,6 +111,35 @@ func TestRenderOPM_CacheHit(t *testing.T) {
 	assertFiles(t, cacheDir, want)
 }
 
+// The same image rendered with different OPM versions must use separate cache entries.
+// 1. Render an image with one fake OPM version.
+// 2. Render the same image in the same cache directory with another fake OPM version.
+// 3. Verify both renders run and their cached outputs remain separate.
+func TestRenderOPM_CacheIsIsolatedByOPMVersion(t *testing.T) {
+	cacheDir := t.TempDir()
+
+	firstRunner := &fakeRunner{version: "opm version one", payload: "rendered by one"}
+	firstPath, err := renderOPM(t.Context(), testImage, cacheDir, Config{}, firstRunner)
+	if err != nil {
+		t.Fatalf("first render: %v", err)
+	}
+
+	secondRunner := &fakeRunner{version: "opm version two", payload: "rendered by two"}
+	secondPath, err := renderOPM(t.Context(), testImage, cacheDir, Config{}, secondRunner)
+	if err != nil {
+		t.Fatalf("second render: %v", err)
+	}
+
+	if firstPath == secondPath {
+		t.Fatalf("cache path must include OPM version, got same path %q", firstPath)
+	}
+	assertContents(t, firstPath, "rendered by one")
+	assertContents(t, secondPath, "rendered by two")
+	firstRunner.assertCalls(t, testImage)
+	secondRunner.assertCalls(t, testImage)
+	assertFiles(t, cacheDir, firstPath, secondPath)
+}
+
 // A long image reference must render and reuse its cache even when its registry exists locally.
 // 1. Create the registry directory and choose a reference that would be too long as a local filename.
 // 2. Render the image twice.
@@ -124,7 +155,7 @@ func TestRenderOPM_LongImageReference(t *testing.T) {
 
 	target := "quay.io/" + repository + ":" + tag + "@" + testDigest
 	cacheDir := t.TempDir()
-	want := filepath.Join(cacheDir, "repositories-sha256", "17ec59b541607a89300cb3a1530da071837e277425c1bf3a7556042f1bf42ec9", "_refs", "tagged-base32", strings.Repeat("or2hi5du", 25)+"or2hi", "digest", testDigest, "catalog")
+	want := filepath.Join(cacheDir, filepath.FromSlash(testOPMVersionCachePath), "repositories-sha256", "17ec59b541607a89300cb3a1530da071837e277425c1bf3a7556042f1bf42ec9", "_refs", "tagged-base32", strings.Repeat("or2hi5du", 25)+"or2hi", "digest", testDigest, "catalog")
 	for range 2 {
 		got, err := renderOPM(t.Context(), target, cacheDir, Config{}, runner)
 		if err != nil || got != want {
@@ -148,11 +179,11 @@ func TestImageCachePath(t *testing.T) {
 	cases := []struct {
 		name, repository, tag, digest, relativePath string
 	}{
-		{"untagged", repository, "", "", testRepositoryCachePath + "/_refs/untagged/no-digest/catalog"},
-		{"tag", repository, "v1", "", testRepositoryCachePath + "/_refs/tagged-base32/oyyq/no-digest/catalog"},
-		{"digest", repository, "", testDigest, testRepositoryCachePath + "/_refs/untagged/digest/" + testDigest + "/catalog"},
-		{"tag and digest", repository, "v1", testDigest, testRepositoryCachePath + "/_refs/tagged-base32/oyyq/digest/" + testDigest + "/catalog"},
-		{"registry port", "localhost:5000/example/index", "v1", "", testRegistryPortCachePath + "/_refs/tagged-base32/oyyq/no-digest/catalog"},
+		{"untagged", repository, "", "", testOPMVersionCachePath + "/" + testRepositoryCachePath + "/_refs/untagged/no-digest/catalog"},
+		{"tag", repository, "v1", "", testOPMVersionCachePath + "/" + testRepositoryCachePath + "/_refs/tagged-base32/oyyq/no-digest/catalog"},
+		{"digest", repository, "", testDigest, testOPMVersionCachePath + "/" + testRepositoryCachePath + "/_refs/untagged/digest/" + testDigest + "/catalog"},
+		{"tag and digest", repository, "v1", testDigest, testOPMVersionCachePath + "/" + testRepositoryCachePath + "/_refs/tagged-base32/oyyq/digest/" + testDigest + "/catalog"},
+		{"registry port", "localhost:5000/example/index", "v1", "", testOPMVersionCachePath + "/" + testRegistryPortCachePath + "/_refs/tagged-base32/oyyq/no-digest/catalog"},
 		{"empty repository", "", "v1", "", ""},
 		{"empty repository component", "quay.io/example//index", "v1", "", ""},
 		{"repository dot", "quay.io/example/./index", "v1", "", ""},
@@ -176,7 +207,7 @@ func TestImageCachePath(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			ref := image.ParsedImageURL{RegistryRepository: tc.repository, Tag: tc.tag, Digest: tc.digest}
-			got, err := imageCachePath(cacheDir, ref)
+			got, err := imageCachePath(cacheDir, testOPMVersion, ref)
 			if tc.relativePath == "" {
 				if err == nil || got != "" {
 					t.Fatalf("unsafe reference = (%q, %v), want empty path and error", got, err)
@@ -391,6 +422,29 @@ func TestRenderOPM_RetryCount(t *testing.T) {
 	}
 }
 
+// Retryable OPM version failures use the configured retry policy before rendering.
+// 1. Configure the fake runner to fail one version check and then return a version.
+// 2. Call renderOPM with one retry allowed.
+// 3. Verify the render succeeds after two version checks and one render.
+func TestRenderOPM_RetriesVersionDetection(t *testing.T) {
+	runner := &fakeRunner{
+		versions: []fakeVersion{
+			{err: errors.New("mock version failed")},
+			{version: "opm recovered version"},
+		},
+		payload: testPayload,
+	}
+	cacheDir := t.TempDir()
+	got, err := renderOPM(t.Context(), testImage, cacheDir, Config{RetryCount: 1}, runner)
+	if err != nil {
+		t.Fatalf("renderOPM: %v", err)
+	}
+	assertContents(t, got, testPayload)
+	runner.assertVersionCalls(t, 2)
+	runner.assertCalls(t, testImage)
+	assertFiles(t, cacheDir, got)
+}
+
 // Invalid retry settings return an error naming the setting without invoking OPM or creating output files.
 // 1. Set an invalid retry count or interval.
 // 2. Call renderOPM.
@@ -449,7 +503,7 @@ func TestRenderOPM_InvalidArguments(t *testing.T) {
 	}
 }
 
-// A directory at the expected cached result path is preserved and rejected without invoking OPM.
+// A directory at the expected cached result path is preserved and rejected without rendering.
 // 1. Create a directory where the cached result file should be.
 // 2. Call renderOPM.
 // 3. Verify an error, an empty result path, and no output files.
@@ -536,10 +590,10 @@ func TestRenderOPM_PublishesAfterSuccess(t *testing.T) {
 	runner.assertCalls(t, testImage)
 }
 
-// A regular file at the cache directory path causes an error without invoking OPM or changing the file.
+// A regular file at the cache directory path causes an error without rendering or changing the file.
 // 1. Create a regular file where the cache directory should be.
 // 2. Call renderOPM for an image using that cache path.
-// 3. Verify a directory error, an empty result path, unchanged file contents, and no runner calls.
+// 3. Verify a directory error, an empty result path, unchanged file contents, and no render calls.
 func TestRenderOPM_OutputDirectoryError(t *testing.T) {
 	runner := &fakeRunner{failOnCall: true}
 	cacheDir := filepath.Join(t.TempDir(), "cache")
@@ -568,6 +622,45 @@ func TestRenderOPM_MissingExecutable(t *testing.T) {
 }
 
 // ── execOPMRunner ───────────────────────────────────────────
+
+// The production runner invokes the configured executable as "opm version" and trims stdout.
+// RenderOPM uses this value to isolate cache entries before invoking "opm render".
+func TestExecOPMRunner_VersionPassesArgumentsAndTrimsOutput(t *testing.T) {
+	script := filepath.Join(t.TempDir(), "opm")
+	writeTestFile(t, script, `#!/bin/sh
+if [ "$#" -ne 1 ] || [ "$1" != "version" ]; then
+	echo "bad args: $*" >&2
+	exit 64
+fi
+printf '  opm version payload  \n'
+`, testExecutableMode)
+	got, err := execOPMRunner{opmPath: script}.Version(t.Context())
+	if err != nil {
+		t.Fatalf("exec version: %v", err)
+	}
+	if got != "opm version payload" {
+		t.Fatalf("exec version = %q, want trimmed payload", got)
+	}
+}
+
+// The production runner rejects oversized "opm version" stdout instead of hashing truncated output.
+func TestExecOPMRunner_VersionRejectsLargeOutput(t *testing.T) {
+	script := filepath.Join(t.TempDir(), "opm")
+	writeTestFile(t, script, `#!/bin/sh
+if [ "$#" -ne 1 ] || [ "$1" != "version" ]; then
+	echo "bad args: $*" >&2
+	exit 64
+fi
+dd if=/dev/zero bs=65537 count=1 2>/dev/null | tr '\0' x
+`, testExecutableMode)
+	got, err := execOPMRunner{opmPath: script}.Version(t.Context())
+	if got != "" || err == nil {
+		t.Fatalf("large version output = (%q, %v), want empty version and error", got, err)
+	}
+	if !strings.Contains(err.Error(), "version output exceeds") {
+		t.Fatalf("large version error = %v, want size-limit error", err)
+	}
+}
 
 // The production runner invokes the configured executable as "opm render <image>" and streams stdout.
 // Render logic is covered above through renderOPM with fakeRunner.
@@ -625,15 +718,40 @@ type fakeRender struct {
 	waitForContext bool
 }
 
+// fakeVersion describes one fake version attempt.
+type fakeVersion struct {
+	version string
+	err     error
+}
+
 // fakeRunner records render targets and returns configured render results.
 type fakeRunner struct {
-	mu          sync.Mutex
-	payload     string
-	shouldRetry bool
-	err         error
-	calls       []string
-	renders     []fakeRender
-	failOnCall  bool
+	mu           sync.Mutex
+	version      string
+	versionErr   error
+	versions     []fakeVersion
+	versionCalls int
+	payload      string
+	shouldRetry  bool
+	err          error
+	calls        []string
+	renders      []fakeRender
+	failOnCall   bool
+}
+
+// Version returns the configured fake OPM version.
+func (r *fakeRunner) Version(ctx context.Context) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	version := r.nextVersion()
+	if version.err != nil {
+		return "", version.err
+	}
+	if version.version != "" {
+		return version.version, nil
+	}
+	return testOPMVersion, nil
 }
 
 // Render writes the configured payload and returns the configured retry decision.
@@ -682,6 +800,33 @@ func (r *fakeRunner) nextRender(target string) fakeRender {
 	return render
 }
 
+// nextVersion records a version attempt and returns the per-call or default fake version result.
+func (r *fakeRunner) nextVersion() fakeVersion {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	callIndex := r.versionCalls
+	r.versionCalls++
+	version := fakeVersion{
+		version: r.version,
+		err:     r.versionErr,
+	}
+	if callIndex < len(r.versions) {
+		version = r.versions[callIndex]
+	}
+	return version
+}
+
+// assertVersionCalls checks how many times the runner was asked for its OPM version.
+func (r *fakeRunner) assertVersionCalls(t *testing.T, want int) {
+	t.Helper()
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.versionCalls != want {
+		t.Fatalf("version calls = %d, want %d", r.versionCalls, want)
+	}
+}
+
 // assertCalls checks the runner's recorded targets in call order.
 func (r *fakeRunner) assertCalls(t *testing.T, want ...string) {
 	t.Helper()
@@ -694,7 +839,7 @@ func (r *fakeRunner) assertCalls(t *testing.T, want ...string) {
 
 // imageCatalogPath returns the expected cached catalog path for testImage.
 func imageCatalogPath(cacheDir string) string {
-	return filepath.Join(cacheDir, filepath.FromSlash(testRepositoryCachePath), "_refs", "tagged-base32", "oyyq", "no-digest", "catalog")
+	return filepath.Join(cacheDir, filepath.FromSlash(testOPMVersionCachePath), filepath.FromSlash(testRepositoryCachePath), "_refs", "tagged-base32", "oyyq", "no-digest", "catalog")
 }
 
 // writeTestFile creates parent directories and writes a file with the given contents and permissions.

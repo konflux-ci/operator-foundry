@@ -42,6 +42,8 @@ const (
 	opmWaitDelay = time.Second
 	// opmStderrLimit bounds stderr retained from the external OPM process for diagnostics.
 	opmStderrLimit = 1 << 20
+	// opmVersionStdoutLimit bounds stdout retained from "opm version".
+	opmVersionStdoutLimit = 64 << 10
 
 	// retryAgain allows retry.Do to repeat a failed operation if retries remain.
 	retryAgain = true
@@ -63,8 +65,7 @@ type Config struct {
 // RenderOPM runs the specified OPM binary against an image reference and returns
 // the path to its rendered output.
 //
-// Successful image renders are cached under cacheDir.
-// The caller should use a separate cacheDir for each OPM version.
+// Successful image renders are cached under cacheDir and isolated by OPM version.
 // The cache is a trusted pipeline directory used by one render at a time.
 // The caller must keep its paths stable throughout rendering and result use.
 //
@@ -76,14 +77,41 @@ func RenderOPM(ctx context.Context, target, opmPath, cacheDir string, cfg Config
 	return renderOPM(ctx, target, cacheDir, cfg, execOPMRunner{opmPath: opmPath})
 }
 
-// opmRunner provides the render operation used by renderOPM.
+// opmRunner provides OPM operations used by renderOPM.
 type opmRunner interface {
+	Version(ctx context.Context) (string, error)
 	Render(ctx context.Context, target string, output io.Writer) (shouldRetry bool, err error)
 }
 
 // execOPMRunner runs the real OPM executable for production rendering.
 type execOPMRunner struct {
 	opmPath string
+}
+
+// Version invokes "opm version" and returns its trimmed stdout.
+func (r execOPMRunner) Version(ctx context.Context) (string, error) {
+	var stdout, stderr bytes.Buffer
+	cmd := exec.CommandContext(ctx, r.opmPath, "version")
+	cmd.Stdout = &limitWriter{w: &stdout, remaining: opmVersionStdoutLimit}
+	cmd.Stderr = &cappedWriter{w: &stderr, remaining: opmStderrLimit}
+	cmd.WaitDelay = opmWaitDelay
+	if err := cmd.Run(); err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return "", ctxErr
+		}
+		if errors.Is(err, errWriteLimitExceeded) {
+			return "", fmt.Errorf("OPM version output exceeds %d bytes: %w", opmVersionStdoutLimit, err)
+		}
+		return "", fmt.Errorf("failed to get OPM version (%s): %w", strings.TrimSpace(stderr.String()), err)
+	}
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return "", ctxErr
+	}
+	version := strings.TrimSpace(stdout.String())
+	if version == "" {
+		return "", fmt.Errorf("failed to get OPM version: output is empty")
+	}
+	return version, nil
 }
 
 // Render invokes "opm render <target>" and streams rendered catalog data to output.
@@ -130,7 +158,15 @@ func renderOPM(ctx context.Context, target, cacheDir string, cfg Config, runner 
 	if err != nil {
 		return "", fmt.Errorf("failed to parse image reference: %w", err)
 	}
-	finalPath, err := imageCachePath(cacheDir, ref)
+	imageComponents, err := imageCacheComponents(ref)
+	if err != nil {
+		return "", fmt.Errorf("failed to build cache path for %q: %w", target, err)
+	}
+	opmVersion, err := identifyOPMVersion(ctx, cfg, runner)
+	if err != nil {
+		return "", err
+	}
+	finalPath, err := cachePath(cacheDir, opmVersion, imageComponents)
 	if err != nil {
 		return "", fmt.Errorf("failed to build cache path for %q: %w", target, err)
 	}
@@ -209,8 +245,43 @@ func (w *cappedWriter) Write(p []byte) (int, error) {
 	return originalLen, nil
 }
 
-// imageCachePath builds a cache path for an image and checks that it stays inside cacheDir.
-func imageCachePath(cacheDir string, ref image.ParsedImageURL) (string, error) {
+var errWriteLimitExceeded = errors.New("write limit exceeded")
+
+type limitWriter struct {
+	w io.Writer
+	// remaining tracks how many more bytes may be written before failing.
+	remaining int
+}
+
+func (w *limitWriter) Write(p []byte) (int, error) {
+	if len(p) > w.remaining {
+		written := 0
+		if w.remaining > 0 {
+			var err error
+			written, err = w.w.Write(p[:w.remaining])
+			w.remaining -= written
+			if err != nil {
+				return written, err
+			}
+		}
+		return written, errWriteLimitExceeded
+	}
+	n, err := w.w.Write(p)
+	w.remaining -= n
+	return n, err
+}
+
+// imageCachePath builds a cache path for an OPM version and image reference.
+func imageCachePath(cacheDir, opmVersion string, ref image.ParsedImageURL) (string, error) {
+	components, err := imageCacheComponents(ref)
+	if err != nil {
+		return "", err
+	}
+	return cachePath(cacheDir, opmVersion, components)
+}
+
+// imageCacheComponents builds the image-specific portion of a cache path.
+func imageCacheComponents(ref image.ParsedImageURL) ([]string, error) {
 	components := strings.Split(ref.RegistryRepository, "/")
 	referenceIndex := len(components)
 	// Explicit branches distinguish absent tags and digests from literal values
@@ -237,7 +308,7 @@ func imageCachePath(cacheDir string, ref image.ParsedImageURL) (string, error) {
 		//   - "/" or "\" within a component;
 		//   - the NUL character (\x00).
 		if component == "" || component == "." || component == ".." || strings.ContainsAny(component, "/\\\x00") {
-			return "", fmt.Errorf("unsafe cache path component %q", component)
+			return nil, fmt.Errorf("unsafe cache path component %q", component)
 		}
 	}
 
@@ -252,6 +323,16 @@ func imageCachePath(cacheDir string, ref image.ParsedImageURL) (string, error) {
 	// overlap the reference layout. The fixed-size key also fits filename limits.
 	repositoryKey := fmt.Sprintf("%x", sha256.Sum256([]byte(ref.RegistryRepository)))
 	components = append([]string{"repositories-sha256", repositoryKey}, components[referenceIndex:]...)
+	return components, nil
+}
+
+// cachePath combines the OPM version namespace with an image cache path and checks containment.
+func cachePath(cacheDir, opmVersion string, imageComponents []string) (string, error) {
+	if opmVersion == "" {
+		return "", fmt.Errorf("OPM version must be present")
+	}
+	opmVersionKey := fmt.Sprintf("%x", sha256.Sum256([]byte(opmVersion)))
+	components := append([]string{"opm-versions-sha256", opmVersionKey}, imageComponents...)
 
 	result := filepath.Join(append([]string{cacheDir}, components...)...)
 	relative, err := filepath.Rel(cacheDir, result)
@@ -262,6 +343,34 @@ func imageCachePath(cacheDir string, ref image.ParsedImageURL) (string, error) {
 		return "", fmt.Errorf("cache path %q escapes cache directory %q", result, cacheDir)
 	}
 	return result, nil
+}
+
+// identifyOPMVersion applies the configured retry policy to retryable version checks.
+func identifyOPMVersion(ctx context.Context, cfg Config, runner opmRunner) (string, error) {
+	var opmVersion string
+	if err := retry.Do(ctx, cfg.RetryCount, cfg.RetryInterval, func(ctx context.Context) (shouldRetry bool, err error) {
+		version, err := runner.Version(ctx)
+		if err != nil {
+			return isRetryableOPMVersionError(err), err
+		}
+		opmVersion = version
+		return stopRetrying, nil
+	}); err != nil {
+		return "", fmt.Errorf("failed to identify OPM version: %w", err)
+	}
+	return opmVersion, nil
+}
+
+func isRetryableOPMVersionError(err error) bool {
+	if errors.Is(err, context.Canceled) ||
+		errors.Is(err, context.DeadlineExceeded) ||
+		errors.Is(err, os.ErrNotExist) ||
+		errors.Is(err, exec.ErrNotFound) ||
+		errors.Is(err, os.ErrPermission) ||
+		errors.Is(err, errWriteLimitExceeded) {
+		return stopRetrying
+	}
+	return retryAgain
 }
 
 // runOPM performs one render, discarding any previous partial output.
