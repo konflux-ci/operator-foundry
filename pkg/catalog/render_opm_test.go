@@ -18,14 +18,16 @@ package catalog
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
+	"fmt"
 	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
-	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -33,13 +35,15 @@ import (
 )
 
 const (
-	testExecutableMode = 0700
-	testImage          = "quay.io/example/index:v1"
-	testDigest         = "sha256:1111111111111111111111111111111111111111111111111111111111111111"
-	testPayload        = "{\"schema\":\"olm.package\",\"name\":\"example\"}\n"
+	testExecutableMode         = 0700
+	testImage                  = "quay.io/example/index:v1"
+	testDigest                 = "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+	testPayload                = "{\"schema\":\"olm.package\",\"name\":\"example\"}\n"
+	testOPMBinaryHash          = "017b91967e57be58a829be2c904eb9b87d95a08d9e8a3eb4a195de8dfc9027cc"
+	testOPMBinaryHashCachePath = "opm-binaries-sha256/" + testOPMBinaryHash
 	// Expected SHA-256 cache prefixes for quay.io/example/index and localhost:5000/example/index.
-	testRepositoryCachePath   = "repositories-sha256/c43e683059d2605481b2596467e290717b14752a7ee70163b6f8ea1aff2096fd"
-	testRegistryPortCachePath = "repositories-sha256/047cf8f3e5a55f861244b86ca83cb199a41e3e8c36b464848c4f8e4db0f9b6cb"
+	testRepositoryCachePath   = testOPMBinaryHashCachePath + "/repositories-sha256/c43e683059d2605481b2596467e290717b14752a7ee70163b6f8ea1aff2096fd"
+	testRegistryPortCachePath = testOPMBinaryHashCachePath + "/repositories-sha256/047cf8f3e5a55f861244b86ca83cb199a41e3e8c36b464848c4f8e4db0f9b6cb"
 
 	testRetryCancelTimeout  = 2 * time.Second
 	testRunnerStartTimeout  = 5 * time.Second
@@ -51,7 +55,7 @@ const (
 // 2. Call renderOPM with a fake runner.
 // 3. Verify one runner call and the expected contents at the correct cache path, with no extra files.
 //
-// Cache paths share the prefix <cacheDir>/repositories-sha256/<repository-hash>/_refs/:
+// Cache paths share the prefix <cacheDir>/opm-binaries-sha256/<opm-binary-hash>/repositories-sha256/<repository-hash>/_refs/:
 //   - No tag or digest: untagged/no-digest/catalog
 //   - Tag only: tagged-base32/<encoded-tag>/no-digest/catalog
 //   - Digest only: untagged/digest/<digest>/catalog
@@ -85,12 +89,12 @@ func TestRenderOPM_CacheMiss(t *testing.T) {
 	}
 }
 
-// An existing cached result is returned unchanged without invoking the runner or creating extra files.
-// 1. Create a cached result and configure the fake runner to fail if invoked.
+// An existing cached result is returned unchanged without rendering or creating extra files.
+// 1. Create a cached result.
 // 2. Call renderOPM for the same image.
-// 3. Verify the existing result is unchanged, the runner was not invoked, and no extra files appeared.
+// 3. Verify binary hash was detected, render was not invoked, and no extra files appeared.
 func TestRenderOPM_CacheHit(t *testing.T) {
-	runner := &fakeRunner{failOnCall: true}
+	runner := &fakeRunner{}
 	cacheDir := t.TempDir()
 	want := imageCatalogPath(cacheDir)
 	writeTestFile(t, want, "previous successful render", testFileMode)
@@ -103,6 +107,7 @@ func TestRenderOPM_CacheHit(t *testing.T) {
 		t.Fatalf("result path = %q, want %q", got, want)
 	}
 	assertContents(t, got, "previous successful render")
+	runner.assertBinaryHashCalls(t, 1)
 	runner.assertCalls(t)
 	assertFiles(t, cacheDir, want)
 }
@@ -112,7 +117,7 @@ func TestRenderOPM_CacheHit(t *testing.T) {
 // 2. Call renderOPM for the same image.
 // 3. Verify the invalid setting is reported, the runner was not invoked, and the cache is unchanged.
 func TestRenderOPM_CacheHitRejectsInvalidRetrySettings(t *testing.T) {
-	runner := &fakeRunner{failOnCall: true}
+	runner := &fakeRunner{}
 	cacheDir := t.TempDir()
 	want := imageCatalogPath(cacheDir)
 	writeTestFile(t, want, "previous successful render", testFileMode)
@@ -125,8 +130,65 @@ func TestRenderOPM_CacheHitRejectsInvalidRetrySettings(t *testing.T) {
 		t.Errorf("configuration error = %v, want %v", err, ErrInvalidRetryCount)
 	}
 	assertContents(t, want, "previous successful render")
+	runner.assertBinaryHashCalls(t, 0)
 	runner.assertCalls(t)
 	assertFiles(t, cacheDir, want)
+}
+
+// The same image rendered with different OPM binary hashes must use separate cache entries.
+// 1. Render the same image with one fake binary hash.
+// 2. Render the same image with a different fake binary hash.
+// 3. Verify separate cache paths and contents for each binary hash.
+func TestRenderOPM_CacheIsIsolatedByOPMBinaryHash(t *testing.T) {
+	cacheDir := t.TempDir()
+
+	firstRunner := &fakeRunner{binaryHash: strings.Repeat("1", sha256.Size*2), payload: "rendered by first binary"}
+	firstPath, err := renderOPM(t.Context(), testImage, cacheDir, Config{}, firstRunner)
+	if err != nil {
+		t.Fatalf("first render: %v", err)
+	}
+
+	secondRunner := &fakeRunner{binaryHash: strings.Repeat("2", sha256.Size*2), payload: "rendered by second binary"}
+	secondPath, err := renderOPM(t.Context(), testImage, cacheDir, Config{}, secondRunner)
+	if err != nil {
+		t.Fatalf("second render: %v", err)
+	}
+
+	if firstPath == secondPath {
+		t.Fatalf("cache path must include OPM binary hash, got same path %q", firstPath)
+	}
+	assertContents(t, firstPath, "rendered by first binary")
+	assertContents(t, secondPath, "rendered by second binary")
+	firstRunner.assertCalls(t, testImage)
+	secondRunner.assertCalls(t, testImage)
+	assertFiles(t, cacheDir, firstPath, secondPath)
+}
+
+// The same image rendered with the same OPM binary hash reuses the binary-scoped cache entry.
+// 1. Render an image with a fake binary hash.
+// 2. Render the same image again with the same fake binary hash.
+// 3. Verify the second render reuses the cached path without invoking render.
+func TestRenderOPM_SameOPMBinaryHashReusesCache(t *testing.T) {
+	cacheDir := t.TempDir()
+
+	firstRunner := &fakeRunner{binaryHash: strings.Repeat("1", sha256.Size*2), payload: "rendered by first binary"}
+	firstPath, err := renderOPM(t.Context(), testImage, cacheDir, Config{}, firstRunner)
+	if err != nil {
+		t.Fatalf("first render: %v", err)
+	}
+
+	secondRunner := &fakeRunner{binaryHash: strings.Repeat("1", sha256.Size*2)}
+	secondPath, err := renderOPM(t.Context(), testImage, cacheDir, Config{}, secondRunner)
+	if err != nil {
+		t.Fatalf("second render: %v", err)
+	}
+	if secondPath != firstPath {
+		t.Fatalf("cached path = %q, want %q", secondPath, firstPath)
+	}
+	assertContents(t, secondPath, "rendered by first binary")
+	secondRunner.assertBinaryHashCalls(t, 1)
+	secondRunner.assertCalls(t)
+	assertFiles(t, cacheDir, firstPath)
 }
 
 // A long image reference must render and reuse its cache even when its registry exists locally.
@@ -144,26 +206,25 @@ func TestRenderOPM_LongImageReference(t *testing.T) {
 
 	target := "quay.io/" + repository + ":" + tag + "@" + testDigest
 	cacheDir := t.TempDir()
-	want := filepath.Join(cacheDir, "repositories-sha256", "17ec59b541607a89300cb3a1530da071837e277425c1bf3a7556042f1bf42ec9", "_refs", "tagged-base32", strings.Repeat("or2hi5du", 25)+"or2hi", "digest", testDigest, "catalog")
+	want := filepath.Join(cacheDir, filepath.FromSlash(testOPMBinaryHashCachePath), "repositories-sha256", "17ec59b541607a89300cb3a1530da071837e277425c1bf3a7556042f1bf42ec9", "_refs", "tagged-base32", strings.Repeat("or2hi5du", 25)+"or2hi", "digest", testDigest, "catalog")
 	for range 2 {
 		got, err := renderOPM(t.Context(), target, cacheDir, Config{}, runner)
 		if err != nil || got != want {
 			t.Fatalf("long image render = (%q, %v), want %q", got, err, want)
 		}
 		assertContents(t, got, testPayload)
-		runner.failOnCall = true
 	}
 	runner.assertCalls(t, target)
 	assertFiles(t, cacheDir, want)
 }
 
-// ── imageCachePath ───────────────────────────────────────────
+// ── buildRenderCachePath ─────────────────────────────────────
 
 // Cache paths must hash the repository identity, encode tags, and reject unsafe reference components.
 // 1. Supply reference fields directly, without passing through ParseImageURL.
-// 2. Call imageCachePath for each valid or unsafe reference.
+// 2. Call buildRenderCachePath for each valid or unsafe reference.
 // 3. Verify the expected path for valid input, or an error and an empty path for unsafe input.
-func TestImageCachePath(t *testing.T) {
+func TestBuildRenderCachePath(t *testing.T) {
 	const repository = "quay.io/example/index"
 	cases := []struct {
 		name, repository, tag, digest, relativePath string
@@ -196,7 +257,7 @@ func TestImageCachePath(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			ref := image.ParsedImageURL{RegistryRepository: tc.repository, Tag: tc.tag, Digest: tc.digest}
-			got, err := imageCachePath(cacheDir, ref)
+			got, err := buildRenderCachePath(cacheDir, testOPMBinaryHash, ref)
 			if tc.relativePath == "" {
 				if err == nil || got != "" {
 					t.Fatalf("unsafe reference = (%q, %v), want empty path and error", got, err)
@@ -216,7 +277,7 @@ func TestImageCachePath(t *testing.T) {
 // 2. Call renderOPM with a reference that would escape the cache directory.
 // 3. Verify an error, an empty result path, no entries in the parent directory, and no runner calls.
 func TestRenderOPM_TraversalCannotEscapeCache(t *testing.T) {
-	runner := &fakeRunner{failOnCall: true}
+	runner := &fakeRunner{}
 	root := t.TempDir()
 	cacheDir := filepath.Join(root, "cache")
 	got, err := renderOPM(t.Context(), "quay.io/../../outside:v1", cacheDir, Config{}, runner)
@@ -239,7 +300,7 @@ func TestRenderOPM_TraversalCannotEscapeCache(t *testing.T) {
 // 2. Call renderOPM with a traversal reference that would otherwise resolve to the same cache path.
 // 3. Verify an error, an empty result path, an unchanged cached result, no extra files, and no runner calls.
 func TestRenderOPM_TraversalCannotReuseCache(t *testing.T) {
-	runner := &fakeRunner{failOnCall: true}
+	runner := &fakeRunner{}
 	cacheDir := t.TempDir()
 	cached := imageCatalogPath(cacheDir)
 	writeTestFile(t, cached, "previous successful render", testFileMode)
@@ -297,7 +358,6 @@ func TestRenderOPM_CachePathsDoNotCollide(t *testing.T) {
 				}
 				paths[i] = path
 			}
-			runner.failOnCall = true
 			for i, target := range targets {
 				path, err := renderOPM(t.Context(), target, cacheDir, Config{}, runner)
 				if err != nil || path != paths[i] {
@@ -319,7 +379,7 @@ func TestRenderOPM_CachePathsDoNotCollide(t *testing.T) {
 func TestRenderOPM_LocalInputIsInvalidImageReference(t *testing.T) {
 	for _, kind := range []string{"file", "directory"} {
 		t.Run(kind, func(t *testing.T) {
-			runner := &fakeRunner{failOnCall: true}
+			runner := &fakeRunner{}
 			t.Chdir(t.TempDir())
 			target := "./local fbc/catalog.json"
 			writeTestFile(t, target, testPayload, testFileMode)
@@ -411,6 +471,170 @@ func TestRenderOPM_RetryCount(t *testing.T) {
 	}
 }
 
+// Retryable OPM binary hash failures use the configured retry policy before rendering.
+// 1. Configure binary hash detection to fail once and then return a valid hash.
+// 2. Call renderOPM with one retry allowed.
+// 3. Verify the retry succeeds before rendering the image.
+func TestRenderOPM_RetriesBinaryHashDetection(t *testing.T) {
+	runner := &fakeRunner{
+		binaryHash:     strings.Repeat("3", sha256.Size*2),
+		binaryHashErrs: []error{errors.New("mock binary hash failed")},
+		payload:        testPayload,
+	}
+	cacheDir := t.TempDir()
+
+	got, err := renderOPM(t.Context(), testImage, cacheDir, Config{RetryCount: 1}, runner)
+	if err != nil {
+		t.Fatalf("renderOPM: %v", err)
+	}
+	assertContents(t, got, testPayload)
+	runner.assertBinaryHashCalls(t, 2)
+	runner.assertCalls(t, testImage)
+	assertFiles(t, cacheDir, got)
+}
+
+// Binary hash detection and rendering each receive the configured retry budget.
+// 1. Configure binary hash detection and rendering to each fail once before succeeding.
+// 2. Call renderOPM with one retry allowed.
+// 3. Verify both phases consume their own retry and the render eventually publishes.
+func TestRenderOPM_RetryBudgetAppliesPerPhase(t *testing.T) {
+	runner := &fakeRunner{
+		binaryHashErrs: []error{errors.New("mock binary hash failed")},
+		renders: []fakeRender{
+			{payload: "partial output", shouldRetry: true, err: errors.New("mock render failed")},
+			{payload: testPayload},
+		},
+	}
+	cacheDir := t.TempDir()
+
+	got, err := renderOPM(t.Context(), testImage, cacheDir, Config{RetryCount: 1}, runner)
+	if err != nil {
+		t.Fatalf("renderOPM: %v", err)
+	}
+	assertContents(t, got, testPayload)
+	runner.assertBinaryHashCalls(t, 2)
+	runner.assertCalls(t, testImage, testImage)
+	assertFiles(t, cacheDir, got)
+}
+
+// Empty OPM binary hash output is rejected without retrying or rendering.
+// 1. Configure the fake runner to return an empty binary hash.
+// 2. Call renderOPM with retries allowed.
+// 3. Verify the empty hash error is returned without rendering.
+func TestRenderOPM_EmptyOPMBinaryHashDoesNotRetryOrRender(t *testing.T) {
+	runner := &fakeRunner{binaryHash: " \n\t "}
+	cacheDir := t.TempDir()
+
+	got, err := renderOPM(t.Context(), testImage, cacheDir, Config{RetryCount: 3}, runner)
+	if err == nil || got != "" {
+		t.Fatalf("empty binary hash = (%q, %v), want empty path and error", got, err)
+	}
+	if !errors.Is(err, ErrEmptyOPMBinaryHash) {
+		t.Fatalf("empty binary hash error = %v, want %v", err, ErrEmptyOPMBinaryHash)
+	}
+	runner.assertBinaryHashCalls(t, 1)
+	runner.assertCalls(t)
+	assertFiles(t, cacheDir)
+}
+
+// The production runner uses the executable's content hash as its binary hash.
+// 1. Create an executable file.
+// 2. Ask the production runner for its binary hash.
+// 3. Verify the hash matches the file contents.
+func TestExecOPMRunner_BinaryHashHashesExecutable(t *testing.T) {
+	script := filepath.Join(t.TempDir(), "opm")
+	writeTestFile(t, script, `#!/bin/sh
+printf 'rendered'
+`, testExecutableMode)
+
+	data, err := os.ReadFile(script)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := fmt.Sprintf("%x", sha256.Sum256(data))
+	got, err := execOPMRunner{opmPath: script}.BinaryHash(t.Context())
+	if err != nil || got != want {
+		t.Fatalf("binary hash = (%q, %v), want %q", got, err, want)
+	}
+}
+
+// Bare executable names are rejected because callers must provide a concrete OPM path.
+// 1. Pass "opm" without a path separator.
+// 2. Call RenderOPM with retries configured.
+// 3. Verify a path error is returned immediately without consulting PATH.
+func TestRenderOPM_RejectsBareExecutableName(t *testing.T) {
+	start := time.Now()
+	got, err := RenderOPM(t.Context(), testImage, "opm", t.TempDir(), Config{
+		RetryCount:    2,
+		RetryInterval: testRetryCancelTimeout,
+	})
+	if err == nil || got != "" || !strings.Contains(err.Error(), "path separator") {
+		t.Fatalf("bare executable = (%q, %v), want empty path and path separator error", got, err)
+	}
+	if !errors.Is(err, errOPMBinaryPathNotExplicit) {
+		t.Fatalf("bare executable error = %v, want %v", err, errOPMBinaryPathNotExplicit)
+	}
+	if elapsed := time.Since(start); elapsed >= testRetryCancelTimeout {
+		t.Fatalf("bare executable took %s, want less than retry interval %s", elapsed, testRetryCancelTimeout)
+	}
+}
+
+// Non-regular OPM paths are rejected before opening, without retrying.
+// 1. Create a directory or FIFO path.
+// 2. Ask the production runner to hash it.
+// 3. Verify the non-regular file error is returned immediately.
+func TestExecOPMRunner_BinaryHashRejectsNonRegularFiles(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		createPath func(t *testing.T) string
+	}{
+		{
+			name: "directory",
+			createPath: func(t *testing.T) string {
+				return t.TempDir()
+			},
+		},
+		{
+			name: "fifo",
+			createPath: func(t *testing.T) string {
+				path := filepath.Join(t.TempDir(), "opm")
+				if err := syscall.Mkfifo(path, 0600); err != nil {
+					t.Fatalf("mkfifo: %v", err)
+				}
+				return path
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(t.Context(), testCancellationTimeout)
+			defer cancel()
+
+			got, err := execOPMRunner{opmPath: tc.createPath(t)}.BinaryHash(ctx)
+			if got != "" || !errors.Is(err, errOPMBinaryNotRegular) {
+				t.Fatalf("binary hash for %s = (%q, %v), want empty hash and %v", tc.name, got, err, errOPMBinaryNotRegular)
+			}
+		})
+	}
+}
+
+// Non-regular OPM paths fail binary identification without consuming retries.
+// 1. Create a directory path and configure retries.
+// 2. Call RenderOPM through the production runner.
+// 3. Verify the permanent error returns before retry intervals can elapse.
+func TestRenderOPM_OPMBinaryDirectoryDoesNotRetry(t *testing.T) {
+	start := time.Now()
+	got, err := RenderOPM(t.Context(), testImage, t.TempDir(), t.TempDir(), Config{
+		RetryCount:    2,
+		RetryInterval: testRetryCancelTimeout,
+	})
+	if got != "" || !errors.Is(err, errOPMBinaryNotRegular) {
+		t.Fatalf("directory OPM path = (%q, %v), want empty path and %v", got, err, errOPMBinaryNotRegular)
+	}
+	if elapsed := time.Since(start); elapsed >= testRetryCancelTimeout {
+		t.Fatalf("directory OPM path took %s, want less than retry interval %s", elapsed, testRetryCancelTimeout)
+	}
+}
+
 // Invalid retry settings return an error naming the setting without invoking OPM or creating output files.
 // 1. Set an invalid retry count or interval.
 // 2. Call renderOPM.
@@ -425,7 +649,7 @@ func TestRenderOPM_InvalidRetrySettings(t *testing.T) {
 		{"RetryInterval", Config{RetryInterval: -time.Nanosecond}, ErrInvalidRetryInterval},
 	} {
 		t.Run(tc.key, func(t *testing.T) {
-			runner := &fakeRunner{failOnCall: true}
+			runner := &fakeRunner{}
 			cacheDir := t.TempDir()
 			got, err := renderOPM(t.Context(), testImage, cacheDir, tc.cfg, runner)
 			if err == nil || got != "" {
@@ -474,7 +698,7 @@ func TestRenderOPM_InvalidArguments(t *testing.T) {
 // 2. Call renderOPM.
 // 3. Verify an error, an empty result path, and no output files.
 func TestRenderOPM_DirectoryIsNotCachedResult(t *testing.T) {
-	runner := &fakeRunner{failOnCall: true}
+	runner := &fakeRunner{}
 	cacheDir := t.TempDir()
 	path := imageCatalogPath(cacheDir)
 	if err := os.MkdirAll(path, testDirectoryMode); err != nil {
@@ -561,7 +785,7 @@ func TestRenderOPM_PublishesAfterSuccess(t *testing.T) {
 // 2. Call renderOPM for an image using that cache path.
 // 3. Verify a directory error, an empty result path, unchanged file contents, and no runner calls.
 func TestRenderOPM_OutputDirectoryError(t *testing.T) {
-	runner := &fakeRunner{failOnCall: true}
+	runner := &fakeRunner{}
 	cacheDir := filepath.Join(t.TempDir(), "cache")
 	writeTestFile(t, cacheDir, "existing file", testFileMode)
 	got, err := renderOPM(t.Context(), testImage, cacheDir, Config{}, runner)
@@ -647,21 +871,35 @@ type fakeRender struct {
 
 // fakeRunner records render targets and returns configured render results.
 type fakeRunner struct {
-	mu          sync.Mutex
-	payload     string
-	shouldRetry bool
-	err         error
-	calls       []string
-	renders     []fakeRender
-	failOnCall  bool
+	binaryHash      string
+	binaryHashErrs  []error
+	binaryHashCalls int
+	payload         string
+	shouldRetry     bool
+	err             error
+	calls           []string
+	renders         []fakeRender
+}
+
+// BinaryHash returns the configured fake OPM binary hash.
+func (r *fakeRunner) BinaryHash(ctx context.Context) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	callIndex := r.binaryHashCalls
+	r.binaryHashCalls++
+	if callIndex < len(r.binaryHashErrs) {
+		return "", r.binaryHashErrs[callIndex]
+	}
+	if r.binaryHash != "" {
+		return r.binaryHash, nil
+	}
+	return testOPMBinaryHash, nil
 }
 
 // Render writes the configured payload and returns the configured retry decision.
 func (r *fakeRunner) Render(ctx context.Context, target string, output io.Writer) (bool, error) {
 	render := r.nextRender(target)
-	if r.failOnCall {
-		return false, errors.New("unexpected runner call")
-	}
 	if render.payload != "" {
 		if _, err := io.WriteString(output, render.payload); err != nil {
 			return false, err
@@ -686,9 +924,6 @@ func (r *fakeRunner) Render(ctx context.Context, target string, output io.Writer
 
 // nextRender records target and returns the per-call or default fake render result.
 func (r *fakeRunner) nextRender(target string) fakeRender {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
 	callIndex := len(r.calls)
 	r.calls = append(r.calls, target)
 	render := fakeRender{
@@ -702,11 +937,17 @@ func (r *fakeRunner) nextRender(target string) fakeRender {
 	return render
 }
 
+// assertBinaryHashCalls checks how many times the runner was asked for its OPM binary hash.
+func (r *fakeRunner) assertBinaryHashCalls(t *testing.T, want int) {
+	t.Helper()
+	if r.binaryHashCalls != want {
+		t.Fatalf("binary hash calls = %d, want %d", r.binaryHashCalls, want)
+	}
+}
+
 // assertCalls checks the runner's recorded targets in call order.
 func (r *fakeRunner) assertCalls(t *testing.T, want ...string) {
 	t.Helper()
-	r.mu.Lock()
-	defer r.mu.Unlock()
 	if !slices.Equal(r.calls, want) {
 		t.Fatalf("runner targets = %q, want %q", r.calls, want)
 	}
