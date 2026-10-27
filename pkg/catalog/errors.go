@@ -42,4 +42,6 @@ var (
 var (
 	// ErrEmptyOPMOutput is returned when OPM succeeds without producing rendered catalog data.
 	ErrEmptyOPMOutput = errors.New("OPM output is empty")
+	// ErrEmptyOPMBinaryHash is returned when the OPM binary identity is empty.
+	ErrEmptyOPMBinaryHash = errors.New("OPM binary hash is empty")
 )
