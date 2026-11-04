@@ -188,11 +188,14 @@ func renderOPM(ctx context.Context, target, cacheDir string, cfg Config, runner 
 
 // validateRetryConfig checks retry settings and identifies the invalid Config field.
 func validateRetryConfig(cfg Config) error {
-	if cfg.RetryCount < 0 {
-		return fmt.Errorf("invalid OPM retry settings for RetryCount: %w", ErrInvalidRetryCount)
-	}
-	if cfg.RetryInterval < 0 {
-		return fmt.Errorf("invalid OPM retry settings for RetryInterval: %w", ErrInvalidRetryInterval)
+	if err := retry.Validate(cfg.RetryCount, cfg.RetryInterval); err != nil {
+		if errors.Is(err, retry.ErrInvalidRetryCount) {
+			return fmt.Errorf("invalid OPM retry settings for RetryCount: %w", err)
+		}
+		if errors.Is(err, retry.ErrInvalidRetryInterval) {
+			return fmt.Errorf("invalid OPM retry settings for RetryInterval: %w", err)
+		}
+		return fmt.Errorf("invalid OPM retry settings: %w", err)
 	}
 	return nil
 }

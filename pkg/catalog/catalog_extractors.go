@@ -120,6 +120,51 @@ func ExtractCatalogMetadata(r io.Reader) (CatalogMetadata, error) {
 	return metadata, nil
 }
 
+// ExtractRelatedImagesByPackageFromCatalog returns sorted, unique related image
+// references from active bundles whose packages are listed in packageNames.
+// Bundle records outside that package set are ignored before their remaining
+// fields are decoded.
+func ExtractRelatedImagesByPackageFromCatalog(r io.Reader, packageNames []string) (map[string][]string, error) {
+	imagesByPackage := make(map[string][]string, len(packageNames))
+	packageSet := make(map[string]struct{}, len(packageNames))
+	for _, packageName := range packageNames {
+		imagesByPackage[packageName] = []string{}
+		packageSet[packageName] = struct{}{}
+	}
+
+	err := readCatalog(r, func(record catalogRecord) error {
+		if !record.matches("schema", "olm.bundle") {
+			return nil
+		}
+		packageName, err := record.nonEmptyString("package")
+		if err != nil {
+			return err
+		}
+		if _, ok := packageSet[packageName]; !ok {
+			return nil
+		}
+		deprecated, err := bundleDeprecated(record)
+		if err != nil {
+			return err
+		}
+		if deprecated {
+			return nil
+		}
+		relatedImages, err := relatedImagesFromBundle(record)
+		if err != nil {
+			return err
+		}
+		imagesByPackage[packageName] = append(imagesByPackage[packageName], relatedImages...)
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	sortAndCompactStringSlices(imagesByPackage)
+	return imagesByPackage, nil
+}
+
 // ExtractUniqueBundlesFromCatalog returns unique active bundle images for packageName
 // in first-seen input order.
 // Only an olm.deprecated property excludes a bundle; olm.deprecations records
@@ -231,20 +276,42 @@ func decodeBundleMetadata(record catalogRecord) (catalogBundleMetadata, bool, er
 		Image:   image,
 	}
 	if rawRelatedImages, ok := record["relatedImages"]; ok {
-		var related []catalogRecord
-		if err := json.Unmarshal(rawRelatedImages, &related); err != nil {
-			return catalogBundleMetadata{}, false, fmt.Errorf("decode relatedImages: %w", err)
+		relatedImages, err := decodeRelatedImages(rawRelatedImages)
+		if err != nil {
+			return catalogBundleMetadata{}, false, err
 		}
-		for _, item := range related {
-			image, err := item.nonEmptyString("image")
-			if err != nil {
-				return catalogBundleMetadata{}, false, err
-			}
-			bundle.RelatedImages = append(bundle.RelatedImages, image)
-		}
+		bundle.RelatedImages = relatedImages
 	}
 
 	return bundle, false, nil
+}
+
+// relatedImagesFromBundle returns the bundle relatedImages field, or an empty
+// slice when the field is omitted.
+func relatedImagesFromBundle(record catalogRecord) ([]string, error) {
+	rawRelatedImages, ok := record["relatedImages"]
+	if !ok {
+		return []string{}, nil
+	}
+	return decodeRelatedImages(rawRelatedImages)
+}
+
+// decodeRelatedImages decodes relatedImages entries and returns their image
+// references in input order.
+func decodeRelatedImages(raw json.RawMessage) ([]string, error) {
+	var related []catalogRecord
+	if err := json.Unmarshal(raw, &related); err != nil {
+		return nil, fmt.Errorf("decode relatedImages: %w", err)
+	}
+	images := make([]string, 0, len(related))
+	for _, item := range related {
+		image, err := item.nonEmptyString("image")
+		if err != nil {
+			return nil, err
+		}
+		images = append(images, image)
+	}
+	return images, nil
 }
 
 // bundleDeprecated reports whether a bundle record has an olm.deprecated

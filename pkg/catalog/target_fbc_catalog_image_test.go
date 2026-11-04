@@ -27,8 +27,11 @@ import (
 
 // If the index image is "registry.io/index:v4.17" and the fragment targets
 // "v4.18", the matching catalog image is "registry.io/index:v4.18".
+// 1. Configure index references and resolved OCP versions.
+// 2. Build target FBC catalog images.
+// 3. Verify each output uses the index repository with resolver-provided tags.
 func TestGetTargetFBCCatalogImages_BuildsImagesForResolvedOCPVersions(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	const fbcFragment = "fbc-fragment-render-target"
 	const digest = "sha256:abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"
 
@@ -107,8 +110,11 @@ func TestGetTargetFBCCatalogImages_BuildsImagesForResolvedOCPVersions(t *testing
 
 // Missing required inputs and invalid index references are reported before any
 // target image is produced.
+// 1. Configure missing inputs, a nil resolver, or an invalid index reference.
+// 2. Build target FBC catalog images.
+// 3. Verify no target image is returned and the expected error is preserved.
 func TestGetTargetFBCCatalogImages_ValidationErrors(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	resolver := func(context.Context, string) ([]string, error) { return []string{"v4.18"}, nil }
 
 	cases := []struct {
@@ -168,8 +174,11 @@ func TestGetTargetFBCCatalogImages_ValidationErrors(t *testing.T) {
 }
 
 // Resolver results must still produce a valid target image reference.
+// 1. Configure invalid OCP versions from the resolver.
+// 2. Build target FBC catalog images.
+// 3. Verify no target image is returned and the invalid reference error is preserved.
 func TestGetTargetFBCCatalogImages_InvalidResolvedOCPVersion(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	cases := []struct {
 		name       string
 		ocpVersion string
@@ -202,10 +211,13 @@ func TestGetTargetFBCCatalogImages_InvalidResolvedOCPVersion(t *testing.T) {
 }
 
 // Resolver failures are surfaced to the caller without producing a target image.
+// 1. Configure the OCP version resolver to fail.
+// 2. Build target FBC catalog images.
+// 3. Verify no target image is returned and the resolver error is preserved.
 func TestGetTargetFBCCatalogImages_PropagatesOCPVersionError(t *testing.T) {
 	wantErr := errors.New("inspect labels failed")
 	got, err := GetTargetFBCCatalogImages(
-		context.Background(),
+		t.Context(),
 		"fbc-fragment-render-target",
 		"registry.example/index:v4.17",
 		func(context.Context, string) ([]string, error) {
