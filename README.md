@@ -64,7 +64,7 @@ operator-foundry fbc check-related-images-mediatype \
 | OCP version is malformed | Exits with error |
 | OCP version >= 4.21 (OCI supported natively) | Writes `SUCCESS` result, exit 0 (check skipped) |
 | All related images use compatible mediaType | Writes `SUCCESS` result, exit 0 |
-| One or more images use incompatible mediaType or cannot be fetched | Writes `FAILURE` result listing the failed images, exit 0. When the list of failing images is long, the output note is truncated at ~3,500 characters. |
+| One or more images use incompatible mediaType or cannot be fetched | Writes `FAILURE` result with counts of incompatible-mediaType and unavailable images in the note |
 
 ### `fbc get-packages`
 

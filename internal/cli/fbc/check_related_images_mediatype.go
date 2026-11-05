@@ -20,14 +20,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"strings"
 
 	"github.com/konflux-ci/operator-foundry/pkg/mediatype"
 	"github.com/konflux-ci/operator-foundry/pkg/testoutput"
 	"github.com/spf13/cobra"
 )
-
-const tektonOutputNoteLimit = 3500
 
 func newCheckRelatedImagesMediaTypeCmd() *cobra.Command {
 	var ocpVersion string
@@ -68,25 +65,11 @@ with the condition that OCI mediaType is not present for OCP < v4.21.`,
 					testoutput.WithNote("All related images use compatible mediaTypes."),
 				)
 			} else {
-				var parts []string
-				if len(result.WrongMediaTypeImages) > 0 {
-					parts = append(parts, fmt.Sprintf("Related images with incompatible mediaTypes: %s",
-						strings.Join(result.WrongMediaTypeImages, ", ")))
-				}
-				if len(result.BrokenImages) > 0 {
-					parts = append(parts, fmt.Sprintf("Broken images: %s",
-						strings.Join(result.BrokenImages, ", ")))
-				}
-				note := strings.Join(parts, "; ")
-
-				// truncate the output
-				if len(note) > tektonOutputNoteLimit {
-					truncated := note[:tektonOutputNoteLimit]
-					if idx := strings.LastIndex(truncated, ", "); idx > 0 {
-						truncated = truncated[:idx]
-					}
-					note = truncated + ", ..."
-				}
+				note := fmt.Sprintf(
+					"Related images mediaType check failed: incompatible=%d, unavailable=%d. See task log for details.",
+					len(result.WrongMediaTypeImages),
+					len(result.BrokenImages),
+				)
 				output, err = testoutput.MakeResultJSON(
 					testoutput.ResultFailure,
 					testoutput.WithFailures(1),
