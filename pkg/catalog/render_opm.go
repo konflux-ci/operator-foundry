@@ -24,6 +24,7 @@ import (
 	"encoding/base32"
 	"errors"
 	"fmt"
+	"hash"
 	"io"
 	"os"
 	"os/exec"
@@ -42,7 +43,6 @@ const (
 	opmWaitDelay = time.Second
 	// opmStderrLimit bounds stderr retained from the external OPM process for diagnostics.
 	opmStderrLimit = 1 << 20
-
 	// retryAgain allows retry.Do to repeat a failed operation if retries remain.
 	retryAgain = true
 	// stopRetrying tells retry.Do to return the operation's result without another attempt.
@@ -63,8 +63,11 @@ type Config struct {
 // RenderOPM runs the specified OPM binary against an image reference and returns
 // the path to its rendered output.
 //
-// Successful image renders are cached under cacheDir.
-// The caller should use a separate cacheDir for each OPM version.
+// The OPM binary must support the "render" subcommand.
+// Successful image renders are cached under cacheDir and isolated by the OPM binary hash.
+// The cache identity is derived from the executable file at opmPath after PATH lookup.
+// The executable must be readable on every call, including cache hits.
+// Wrappers that delegate to mutable implementations are the caller's responsibility.
 // The cache is a trusted pipeline directory used by one render at a time.
 // The caller must keep its paths stable throughout rendering and result use.
 //
@@ -76,14 +79,24 @@ func RenderOPM(ctx context.Context, target, opmPath, cacheDir string, cfg Config
 	return renderOPM(ctx, target, cacheDir, cfg, execOPMRunner{opmPath: opmPath})
 }
 
-// opmRunner provides the render operation used by renderOPM.
+// opmRunner provides OPM operations used by renderOPM.
 type opmRunner interface {
+	BinaryHash(ctx context.Context) (string, error)
 	Render(ctx context.Context, target string, output io.Writer) (shouldRetry bool, err error)
 }
 
 // execOPMRunner runs the real OPM executable for production rendering.
 type execOPMRunner struct {
 	opmPath string
+}
+
+// BinaryHash returns the SHA-256 digest of the configured OPM executable.
+func (r execOPMRunner) BinaryHash(ctx context.Context) (string, error) {
+	opmPath, err := resolveExecutablePath(r.opmPath)
+	if err != nil {
+		return "", err
+	}
+	return hashFile(ctx, opmPath, sha256.New())
 }
 
 // Render invokes "opm render <target>" and streams rendered catalog data to output.
@@ -126,7 +139,11 @@ func renderOPM(ctx context.Context, target, cacheDir string, cfg Config, runner 
 	if err != nil {
 		return "", fmt.Errorf("failed to parse image reference: %w", err)
 	}
-	finalPath, err := imageCachePath(cacheDir, ref)
+	opmBinaryHash, err := identifyOPMBinary(ctx, cfg, runner)
+	if err != nil {
+		return "", err
+	}
+	finalPath, err := imageCachePath(cacheDir, opmBinaryHash, ref)
 	if err != nil {
 		return "", fmt.Errorf("failed to build cache path for %q: %w", target, err)
 	}
@@ -221,8 +238,19 @@ func (w *cappedWriter) Write(p []byte) (int, error) {
 	return originalLen, nil
 }
 
-// imageCachePath builds a cache path for an image and checks that it stays inside cacheDir.
-func imageCachePath(cacheDir string, ref image.ParsedImageURL) (string, error) {
+var errOPMBinaryNotRegular = errors.New("OPM binary is not a regular file")
+
+// imageCachePath builds a cache path for an OPM binary hash and image reference.
+func imageCachePath(cacheDir, opmBinaryHash string, ref image.ParsedImageURL) (string, error) {
+	imagePathComponents, err := buildImageCachePathComponents(ref)
+	if err != nil {
+		return "", err
+	}
+	return buildOPMCachePath(cacheDir, opmBinaryHash, imagePathComponents)
+}
+
+// buildImageCachePathComponents builds the image-specific portion of a cache path.
+func buildImageCachePathComponents(ref image.ParsedImageURL) ([]string, error) {
 	components := strings.Split(ref.RegistryRepository, "/")
 	referenceIndex := len(components)
 	// Explicit branches distinguish absent tags and digests from literal values
@@ -249,7 +277,7 @@ func imageCachePath(cacheDir string, ref image.ParsedImageURL) (string, error) {
 		//   - "/" or "\" within a component;
 		//   - the NUL character (\x00).
 		if component == "" || component == "." || component == ".." || strings.ContainsAny(component, "/\\\x00") {
-			return "", fmt.Errorf("unsafe cache path component %q", component)
+			return nil, fmt.Errorf("unsafe cache path component %q", component)
 		}
 	}
 
@@ -264,7 +292,19 @@ func imageCachePath(cacheDir string, ref image.ParsedImageURL) (string, error) {
 	// overlap the reference layout. The fixed-size key also fits filename limits.
 	repositoryKey := fmt.Sprintf("%x", sha256.Sum256([]byte(ref.RegistryRepository)))
 	components = append([]string{"repositories-sha256", repositoryKey}, components[referenceIndex:]...)
+	return components, nil
+}
 
+// buildOPMCachePath combines the OPM binary namespace with an image cache path and checks containment.
+func buildOPMCachePath(cacheDir, opmBinaryHash string, imagePathComponents []string) (string, error) {
+	opmBinaryHash = strings.TrimSpace(opmBinaryHash)
+	if opmBinaryHash == "" {
+		return "", ErrEmptyOPMBinaryHash
+	}
+	if !isSHA256Hex(opmBinaryHash) {
+		return "", fmt.Errorf("invalid OPM binary hash %q", opmBinaryHash)
+	}
+	components := append([]string{"opm-binaries-sha256", opmBinaryHash}, imagePathComponents...)
 	result := filepath.Join(append([]string{cacheDir}, components...)...)
 	relative, err := filepath.Rel(cacheDir, result)
 	if err != nil {
@@ -274,6 +314,108 @@ func imageCachePath(cacheDir string, ref image.ParsedImageURL) (string, error) {
 		return "", fmt.Errorf("cache path %q escapes cache directory %q", result, cacheDir)
 	}
 	return result, nil
+}
+
+// identifyOPMBinary applies the configured retry policy to retryable binary hash checks.
+func identifyOPMBinary(ctx context.Context, cfg Config, runner opmRunner) (string, error) {
+	var binaryHash string
+	if err := retry.Do(ctx, cfg.RetryCount, cfg.RetryInterval, func(ctx context.Context) (bool, error) {
+		got, err := runner.BinaryHash(ctx)
+		if err != nil {
+			return isRetryableOPMBinaryHashError(err), err
+		}
+		got = strings.TrimSpace(got)
+		if got == "" {
+			return stopRetrying, ErrEmptyOPMBinaryHash
+		}
+		binaryHash = got
+		return stopRetrying, nil
+	}); err != nil {
+		return "", fmt.Errorf("failed to identify OPM binary: %w", err)
+	}
+	return binaryHash, nil
+}
+
+// isRetryableOPMBinaryHashError reports whether a binary hash error allows another attempt.
+func isRetryableOPMBinaryHashError(err error) bool {
+	if errors.Is(err, context.Canceled) ||
+		errors.Is(err, context.DeadlineExceeded) ||
+		errors.Is(err, os.ErrNotExist) ||
+		errors.Is(err, exec.ErrNotFound) ||
+		errors.Is(err, os.ErrPermission) ||
+		errors.Is(err, errOPMBinaryNotRegular) ||
+		errors.Is(err, ErrEmptyOPMBinaryHash) {
+		return stopRetrying
+	}
+	return retryAgain
+}
+
+// resolveExecutablePath applies exec lookup semantics to bare executable names.
+func resolveExecutablePath(path string) (string, error) {
+	if filepath.Base(path) != path {
+		return path, nil
+	}
+	resolved, err := exec.LookPath(path)
+	if err != nil {
+		return "", fmt.Errorf("failed to find OPM binary: %w", err)
+	}
+	return resolved, nil
+}
+
+// hashFile returns the lowercase hex digest of the file contents.
+func hashFile(ctx context.Context, path string, h hash.Hash) (digest string, err error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return "", fmt.Errorf("failed to inspect OPM binary: %w", err)
+	}
+	if !info.Mode().IsRegular() {
+		return "", fmt.Errorf("OPM binary %q is not a regular file: %w", path, errOPMBinaryNotRegular)
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		return "", fmt.Errorf("failed to open OPM binary: %w", err)
+	}
+	defer func() {
+		if closeErr := file.Close(); closeErr != nil && err == nil {
+			err = fmt.Errorf("failed to close OPM binary: %w", closeErr)
+		}
+	}()
+	buffer := make([]byte, 32*1024)
+	for {
+		if err := ctx.Err(); err != nil {
+			return "", err
+		}
+		n, err := file.Read(buffer)
+		if n > 0 {
+			if _, writeErr := h.Write(buffer[:n]); writeErr != nil {
+				return "", fmt.Errorf("failed to hash OPM binary: %w", writeErr)
+			}
+		}
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			return "", fmt.Errorf("failed to read OPM binary: %w", err)
+		}
+	}
+	return fmt.Sprintf("%x", h.Sum(nil)), nil
+}
+
+// isSHA256Hex reports whether value is a lowercase or uppercase SHA-256 hex digest.
+func isSHA256Hex(value string) bool {
+	if len(value) != sha256.Size*2 {
+		return false
+	}
+	for _, c := range value {
+		if (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F') {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 // runOPM performs one render, discarding any previous partial output.
