@@ -153,8 +153,11 @@ func renderOPM(ctx context.Context, target, cacheDir string, cfg Config, runner 
 	if err != nil {
 		return "", fmt.Errorf("failed to create temporary output: %w", err)
 	}
+	outputClosed := false
 	defer func() {
-		_ = output.Close()
+		if !outputClosed {
+			_ = output.Close()
+		}
 		_ = os.Remove(output.Name())
 	}()
 
@@ -166,6 +169,7 @@ func renderOPM(ctx context.Context, target, cacheDir string, cfg Config, runner 
 	if err := output.Close(); err != nil {
 		return "", fmt.Errorf("failed to close output: %w", err)
 	}
+	outputClosed = true
 	if rendered, err := os.Stat(output.Name()); err != nil {
 		return "", fmt.Errorf("failed to inspect rendered output: %w", err)
 	} else if rendered.Size() == 0 {
@@ -184,14 +188,11 @@ func renderOPM(ctx context.Context, target, cacheDir string, cfg Config, runner 
 
 // validateRetryConfig checks retry settings and identifies the invalid Config field.
 func validateRetryConfig(cfg Config) error {
-	if err := retry.Validate(cfg.RetryCount, cfg.RetryInterval); err != nil {
-		if errors.Is(err, retry.ErrInvalidRetryCount) {
-			return fmt.Errorf("invalid OPM retry settings for RetryCount: %w", err)
-		}
-		if errors.Is(err, retry.ErrInvalidRetryInterval) {
-			return fmt.Errorf("invalid OPM retry settings for RetryInterval: %w", err)
-		}
-		return fmt.Errorf("invalid OPM retry settings: %w", err)
+	if cfg.RetryCount < 0 {
+		return fmt.Errorf("invalid OPM retry settings for RetryCount: %w", ErrInvalidRetryCount)
+	}
+	if cfg.RetryInterval < 0 {
+		return fmt.Errorf("invalid OPM retry settings for RetryInterval: %w", ErrInvalidRetryInterval)
 	}
 	return nil
 }
