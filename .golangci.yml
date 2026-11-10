@@ -4,7 +4,8 @@
 version: "2"
 
 run:
-  go: "1.26.6"
+  # No explicit go version: golangci-lint reads it from the go directive in
+  # go.mod, so it can't drift when Renovate bumps that directive (#113).
   timeout: 5m
 
 linters:
