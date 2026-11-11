@@ -3,5 +3,12 @@
   "ignorePaths": [
     ".github/workflows/fullsend.yaml",
     ".github/workflows/prioritize.yml"
+  ],
+  "packageRules": [
+    {
+      "matchManagers": ["gomod"],
+      "matchDepTypes": ["indirect"],
+      "enabled": true
+    }
   ]
 }
