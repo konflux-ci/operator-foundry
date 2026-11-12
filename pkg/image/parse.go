@@ -94,7 +94,13 @@ func looksFullyQualified(ref string) bool {
 		return false
 	}
 	host := ref[:slash]
-	return strings.ContainsAny(host, ".:") || host == "localhost"
+	return looksLikeRegistryHost(host)
+}
+
+// looksLikeRegistryHost reports whether s looks like a registry authority
+// (hostname with a dot, host:port, or localhost), not a Docker Hub short name.
+func looksLikeRegistryHost(s string) bool {
+	return strings.ContainsAny(s, ".:") || s == "localhost"
 }
 
 // extractTagBeforeDigest extracts the tag from a "repo:tag@digest" reference.
