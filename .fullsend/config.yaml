@@ -14,11 +14,12 @@ roles:
 allowed_remote_resources:
     - https://raw.githubusercontent.com/fullsend-ai/fullsend/
     - https://raw.githubusercontent.com/fullsend-ai/agents/
-create_issues:
-    allow_targets:
-        repos:
-            - konflux-ci/operator-foundry
-            - fullsend-ai/fullsend
+tracker:
+    github:
+        allowed_targets:
+            repos:
+                - konflux-ci/operator-foundry
+                - fullsend-ai/fullsend
 inference:
     project: it-gcp-operator-foundry
     wif_provider: projects/21066242673/locations/global/workloadIdentityPools/itpc-identity-pool/providers/github-com
