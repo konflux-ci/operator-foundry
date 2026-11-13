@@ -26,6 +26,18 @@ var (
 	ErrInvalidImageReference = errors.New("invalid image reference")
 )
 
+// Mirror config errors
+var (
+	// ErrMirrorConfigReadFailed is returned when an ImageDigestMirrorSet file cannot be read.
+	ErrMirrorConfigReadFailed = errors.New("mirror configuration file read failed")
+	// ErrMirrorConfigParseFailed is returned when an ImageDigestMirrorSet file cannot be parsed as YAML.
+	ErrMirrorConfigParseFailed = errors.New("mirror configuration file parse failed")
+	// ErrInvalidMirrorSource is returned when a source repository fails validation.
+	ErrInvalidMirrorSource = errors.New("invalid mirror source")
+	// ErrInvalidMirror is returned when a mirror repository fails validation.
+	ErrInvalidMirror = errors.New("invalid mirror")
+)
+
 // Inspection errors
 var (
 	// ErrRawInspectFailed is returned when the raw manifest fetch fails.
