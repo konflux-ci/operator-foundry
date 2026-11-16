@@ -143,6 +143,33 @@ func TestExtractCatalogMetadata_ReadErrorDiscardsPartialResults(t *testing.T) {
 	}
 }
 
+func TestExtractRelatedImagesByPackageFromCatalog_IgnoresMalformedUnscopedBundles(t *testing.T) {
+	input := strings.ReplaceAll(alphaBundle, "alpha", "zeta") + invalidAlphaBundleMissingProperties
+	got, err := ExtractRelatedImagesByPackageFromCatalog(strings.NewReader(input), []string{"zeta"})
+	if err != nil {
+		t.Fatalf("extract related images by package: %v", err)
+	}
+	assertStringSlice(t, got["zeta"], []string{"registry.example/zeta-operator:1.0.0"})
+	if _, ok := got["alpha"]; ok {
+		t.Fatalf("unexpected alpha package entry: %#v", got)
+	}
+}
+
+// Package-scoped related image extraction still validates malformed matching
+// bundles and discards all partial results.
+// 1. Supply a valid alpha bundle followed by a malformed alpha bundle.
+// 2. Extract related images for alpha.
+// 3. Verify no package map is returned and the matching bundle error is reported.
+func TestExtractRelatedImagesByPackageFromCatalog_ErrorsOnMalformedScopedBundles(t *testing.T) {
+	got, err := ExtractRelatedImagesByPackageFromCatalog(strings.NewReader(alphaBundle+invalidAlphaBundleMissingProperties), []string{"alpha"})
+	if got != nil || err == nil {
+		t.Fatalf("extract related images by package = (%#v, %v), want nil and an error", got, err)
+	}
+	if !strings.Contains(err.Error(), "catalog record 2: properties must be present") {
+		t.Fatalf("error = %q, want missing properties failure in record 2", err)
+	}
+}
+
 // Active zeta bundles retain first-seen input order and deduplicate image references.
 func TestExtractUniqueBundlesFromCatalog_Mixed(t *testing.T) {
 	got, err := ExtractUniqueBundlesFromCatalog(strings.NewReader(extractorFixture(t, "mixed.json")), "zeta")
