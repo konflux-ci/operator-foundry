@@ -25,9 +25,6 @@ import (
 )
 
 // Every object reaches the consumer individually with its fields and input order intact.
-// 1. Write indented A/B/C records, including nested extra fields and a custom schema, to a file.
-// 2. Read the file through the shared parser and inspect each callback separately.
-// 3. Verify three deliveries and normal completion; repeat A/B/A to preserve duplicate records.
 func TestReadCatalog_Records(t *testing.T) {
 	a := `{
     "schema": "olm.package",
@@ -76,9 +73,6 @@ func TestReadCatalog_Empty(t *testing.T) {
 }
 
 // A record with an extra string larger than 64 KiB is delivered intact, followed by the next object.
-// 1. Write a large indented package record and a second package to a temporary file.
-// 2. Inspect both parser deliveries, including the complete large field.
-// 3. Verify normal completion after exactly two records.
 func TestReadCatalog_LargeRecord(t *testing.T) {
 	first := `{
     "schema": "olm.package",

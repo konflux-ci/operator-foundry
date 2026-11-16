@@ -26,9 +26,6 @@ import (
 
 // sourceRef is used as the input image reference across base image tests.
 const sourceRef = "registry.io/repo@" + digestRef
-
-// ── GetBaseImage tests ─────────────────────────────────────────
-
 // Happy path with both annotations — tag preserved and digest appended.
 func TestGetBaseImage_HappyPathBothAnnotations(t *testing.T) {
 	manifestRef := "registry.io/repo@" + digestAmd64

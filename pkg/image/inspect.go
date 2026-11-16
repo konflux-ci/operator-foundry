@@ -202,7 +202,6 @@ func GetAnnotations(ctx context.Context, inspector ImageInspector, imageRef stri
 	return manifest.Annotations, nil
 }
 
-// platformKey combines the OS and architecture.
 func platformKey(os, arch string) string {
 	if os == "" || arch == "" {
 		return ""

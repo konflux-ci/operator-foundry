@@ -31,9 +31,6 @@ import (
 	"github.com/google/go-containerregistry/pkg/v1/mutate"
 	"github.com/google/go-containerregistry/pkg/v1/remote"
 )
-
-// ── Test helpers ───────────────────────────────────────────────
-
 // setupRegistry starts an in-memory OCI registry and returns its base URL
 // (e.g. "localhost:12345"). The server is shut down when the test finishes.
 func setupRegistry(t *testing.T) string {
@@ -120,9 +117,6 @@ func mustParseRef(t *testing.T, s string) name.Reference {
 	}
 	return ref
 }
-
-// ── Inspect tests ──────────────────────────────────────────────
-
 // Happy path — verify all three fields parsed correctly.
 func TestInspect_HappyPath(t *testing.T) {
 	base := setupRegistry(t)
@@ -182,9 +176,6 @@ func TestInspect_UnreachableRegistry(t *testing.T) {
 		t.Errorf("expected error to wrap ErrImageFetchFailed, got: %v", err)
 	}
 }
-
-// ── InspectRaw tests ───────────────────────────────────────────
-
 // Happy path — verify raw manifest is valid JSON containing the config digest.
 func TestInspectRaw_HappyPath(t *testing.T) {
 	base := setupRegistry(t)
@@ -225,9 +216,6 @@ func TestInspectRaw_UnreachableRegistry(t *testing.T) {
 		t.Errorf("expected error to wrap ErrRawInspectFailed, got: %v", err)
 	}
 }
-
-// ── GetManifests tests ─────────────────────────────────────────
-
 // Multi-arch image index (happy path).
 func TestGetManifests_MultiArchIndex(t *testing.T) {
 	base := setupRegistry(t)
@@ -465,9 +453,6 @@ func TestGetManifests_TagOnlyRef(t *testing.T) {
 		t.Errorf("amd64 = %q, want %q", got["linux/amd64"], imgDigest)
 	}
 }
-
-// ── GetAnnotations tests ───────────────────────────────────────
-
 // Annotations present — both key-value pairs returned.
 func TestGetAnnotations_Present(t *testing.T) {
 	raw := `{"annotations":{"org.opencontainers.image.base.name":"registry.io/base:v1","custom":"value"}}`
