@@ -199,7 +199,6 @@ func readActiveBundles(r io.Reader, packageName string, consume func(catalogReco
 	})
 }
 
-// catalogBundleMetadata holds the bundle fields used by catalog extractors.
 type catalogBundleMetadata struct {
 	Package       string
 	Image         string
@@ -271,7 +270,6 @@ func bundleDeprecated(record catalogRecord) (bool, error) {
 	return false, nil
 }
 
-// appendUniqueString appends value only if it is not already present.
 func appendUniqueString(values []string, value string) []string {
 	if slices.Contains(values, value) {
 		return values
@@ -279,7 +277,6 @@ func appendUniqueString(values []string, value string) []string {
 	return append(values, value)
 }
 
-// sortAndCompactStringSlices sorts and deduplicates each map value in place.
 func sortAndCompactStringSlices(valuesByKey map[string][]string) {
 	for key, values := range valuesByKey {
 		slices.Sort(values)

@@ -23,9 +23,6 @@ import (
 
 // validDigest is a syntactically valid SHA-256 digest used across test cases.
 const validDigest = "sha256:abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"
-
-// ── ParseImageURL ──────────────────────────────────────────────
-
 func TestParseImageURL_Success(t *testing.T) {
 	cases := []struct {
 		name     string
@@ -147,9 +144,6 @@ func TestParseImageURL_InvalidReference_ReturnsError(t *testing.T) {
 		})
 	}
 }
-
-// ── GetImageRegistryAndRepository ──────────────────────────────
-
 func TestGetImageRegistryAndRepository_InvalidInput_ReturnsError(t *testing.T) {
 	if _, err := GetImageRegistryAndRepository(""); err == nil {
 		t.Fatal("expected error for empty image url, got nil")
@@ -178,9 +172,6 @@ func TestGetImageRegistryAndRepository(t *testing.T) {
 		})
 	}
 }
-
-// ── GetImageRegistryRepositoryTag ──────────────────────────────
-
 func TestGetImageRegistryRepositoryTag_InvalidInput_ReturnsError(t *testing.T) {
 	if _, err := GetImageRegistryRepositoryTag(""); err == nil {
 		t.Fatal("expected error for empty image url, got nil")
@@ -210,9 +201,6 @@ func TestGetImageRegistryRepositoryTag(t *testing.T) {
 		})
 	}
 }
-
-// ── GetImageRegistryRepositoryDigest ───────────────────────────
-
 func TestGetImageRegistryRepositoryDigest_InvalidInput_ReturnsError(t *testing.T) {
 	if _, err := GetImageRegistryRepositoryDigest(""); err == nil {
 		t.Fatal("expected error for empty image url, got nil")

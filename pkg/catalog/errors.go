@@ -22,7 +22,7 @@ import (
 	"github.com/konflux-ci/operator-foundry/pkg/retry"
 )
 
-// Argument validation errors
+// Argument validation errors.
 var (
 	// ErrEmptyPackageName is returned when a bundle or related image query has no package name.
 	ErrEmptyPackageName = errors.New("FBC catalog package name is empty")
@@ -46,7 +46,7 @@ var (
 	ErrInvalidRetryInterval = retry.ErrInvalidRetryInterval
 )
 
-// Render errors
+// Render errors.
 var (
 	// ErrEmptyOPMOutput is returned when OPM succeeds without producing rendered catalog data.
 	ErrEmptyOPMOutput = errors.New("OPM output is empty")
