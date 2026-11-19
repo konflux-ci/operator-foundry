@@ -18,9 +18,12 @@ package fbc
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 
+	"github.com/konflux-ci/operator-foundry/pkg/image"
 	"github.com/konflux-ci/operator-foundry/pkg/mediatype"
 	"github.com/konflux-ci/operator-foundry/pkg/testoutput"
 	"github.com/spf13/cobra"
@@ -29,6 +32,7 @@ import (
 func newCheckRelatedImagesMediaTypeCmd() *cobra.Command {
 	var ocpVersion string
 	var relatedImagesPath string
+	var imageMirrorSetPath string
 	var outputFile string
 
 	cmd := &cobra.Command{
@@ -43,8 +47,10 @@ with the condition that OCI mediaType is not present for OCP < v4.21.`,
 				return err
 			}
 
-			// Run the mediaType compatibility check against the group of images saved in relatedImages
-			fetcher := &mediatype.RegistryFetcher{}
+			fetcher, err := newMediaTypeFetcher(imageMirrorSetPath)
+			if err != nil {
+				return err
+			}
 			result, err := mediatype.CheckRelatedImagesMediaType(cmd.Context(), ocpVersion, relatedImages, fetcher)
 			if err != nil {
 				return err
@@ -94,6 +100,7 @@ with the condition that OCI mediaType is not present for OCP < v4.21.`,
 
 	cmd.Flags().StringVar(&ocpVersion, "ocp-version", "", "OCP version to check the related bundle images against (required)")
 	cmd.Flags().StringVar(&relatedImagesPath, "related-images-json-path", "", "Path to the file with saved JSON list of related bundle images (required)")
+	cmd.Flags().StringVar(&imageMirrorSetPath, "image-mirror-set-path", "", "Optional path to an ImageDigestMirrorSet YAML file used when the original pullspec is unreachable")
 	cmd.Flags().StringVar(&outputFile, "output", "", "Path to write the result (default: stdout)")
 
 	for _, flag := range []string{"ocp-version", "related-images-json-path"} {
@@ -103,6 +110,29 @@ with the condition that OCI mediaType is not present for OCP < v4.21.`,
 	}
 
 	return cmd
+}
+
+// newMediaTypeFetcher returns a RegistryFetcher, optionally wrapped with IDMS
+// mirroring. A missing mirror-set file is treated as no mirrors; a present but
+// invalid file is an error.
+func newMediaTypeFetcher(imageMirrorSetPath string) (mediatype.ManifestFetcher, error) {
+	var fetcher mediatype.ManifestFetcher = &mediatype.RegistryFetcher{}
+	if imageMirrorSetPath == "" {
+		return fetcher, nil
+	}
+
+	mirrorMap, err := image.LoadMirrorConfigFromFile(imageMirrorSetPath)
+	if err != nil {
+		if errors.Is(err, image.ErrMirrorConfigReadFailed) {
+			slog.Warn("image mirror set not readable, continuing without mirrors",
+				"path", imageMirrorSetPath,
+				"error", err,
+			)
+			return fetcher, nil
+		}
+		return nil, err
+	}
+	return &mediatype.MirroringFetcher{Inner: fetcher, Mirrors: mirrorMap}, nil
 }
 
 // loadRelatedImages reads the JSON file at path and returns the image reference strings it contains.

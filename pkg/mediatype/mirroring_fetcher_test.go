@@ -160,3 +160,11 @@ func TestMirroringFetcher_NilMirrorMap_Passthrough(t *testing.T) {
 		t.Fatalf("calls = %v, want only original", inner.calls)
 	}
 }
+
+func TestMirroringFetcher_NilInner_ReturnsError(t *testing.T) {
+	fetcher := &MirroringFetcher{Inner: nil}
+	_, err := fetcher.FetchManifest(context.Background(), "registry.redhat.io/foo/bar:v1")
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+}

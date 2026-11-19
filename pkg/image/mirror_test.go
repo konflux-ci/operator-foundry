@@ -21,17 +21,20 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
-// Unit tests for LoadMirrorConfigFromFile.
-// They exercise pure local I/O + YAML parse + validation against temp files;
-// no registry, network, or cluster access.
+// Unit tests for LoadMirrorConfigFromFile, ReplaceImagePullspec, and
+// ResolveMirrors. They exercise pure local I/O + YAML parse + validation +
+// mirror resolution; no registry, network, or cluster access.
 //
 // Covered behavior: load ImageDigestMirrorSet YAML into source -> []mirrors,
 // requiring YAML string scalars, ignoring well-formed trailing documents,
-// rejecting malformed trailing YAML, and validating sources/mirrors via
-// go-containerregistry (repository path or registry-only host).
+// rejecting malformed trailing YAML, validating sources/mirrors via
+// go-containerregistry, and exact-key mirror pullspec resolution.
 
 // writeMirrorFile is a test helper that writes YAML into a unique temp path.
 func writeMirrorFile(t *testing.T, contents string) string {
@@ -173,8 +176,44 @@ spec:
 	}
 }
 
-// Unit test: trailing YAML after the IDMS (bash yq '.' parity): bare "---"
-// and an extra valid document are ignored; the first document still loads.
+// Unit test: isEmptyYAMLDocument is true only for missing/null bodies, not
+// for non-null scalars or empty mappings/sequences.
+func TestIsEmptyYAMLDocument(t *testing.T) {
+	decodeDoc := func(t *testing.T, src string) *yaml.Node {
+		t.Helper()
+		var doc yaml.Node
+		if err := yaml.NewDecoder(strings.NewReader(src)).Decode(&doc); err != nil {
+			t.Fatalf("Decode(%q): %v", src, err)
+		}
+		return &doc
+	}
+
+	tests := []struct {
+		name string
+		src  string
+		want bool
+	}{
+		{name: "bare separator", src: "---\n", want: true},
+		{name: "explicit null", src: "null\n", want: true},
+		{name: "tilde null", src: "~\n", want: true},
+		{name: "string scalar", src: "hello\n", want: false},
+		{name: "int scalar", src: "42\n", want: false},
+		{name: "empty mapping", src: "{}\n", want: false},
+		{name: "empty sequence", src: "[]\n", want: false},
+		{name: "idms mapping", src: "spec:\n  imageDigestMirrors: []\n", want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := isEmptyYAMLDocument(decodeDoc(t, tt.src))
+			if got != tt.want {
+				t.Errorf("isEmptyYAMLDocument(%q) = %v, want %v", tt.src, got, tt.want)
+			}
+		})
+	}
+}
+
+// Unit test: empty leading docs are skipped and trailing YAML after the IDMS
+// (bash yq '.' parity) is ignored; the IDMS document still loads.
 func TestLoadMirrorConfigFromFile_TrailingYAMLIgnored(t *testing.T) {
 	tests := []struct {
 		name string
@@ -202,6 +241,17 @@ spec:
 ---
 apiVersion: v1
 kind: ConfigMap
+`,
+		},
+		{
+			name: "empty leading documents",
+			yaml: `---
+---
+spec:
+  imageDigestMirrors:
+  - source: registry.redhat.io/foo
+    mirrors:
+    - mirror.example.com/foo
 `,
 		},
 	}
@@ -361,6 +411,22 @@ this: is: broken: {{
 			wantErr: ErrMirrorConfigParseFailed,
 		},
 		{
+			// Non-null scalars are real documents; do not skip past them to a
+			// later IDMS mapping (isEmptyYAMLDocument must not treat !!str as empty).
+			name: "leading non-null scalar document",
+			path: func(t *testing.T) string {
+				return writeMirrorFile(t, `not-an-idms
+---
+spec:
+  imageDigestMirrors:
+  - source: registry.redhat.io/foo
+    mirrors:
+    - mirror.example.com/foo
+`)
+			},
+			wantErr: ErrMirrorConfigParseFailed,
+		},
+		{
 			name: "empty source",
 			path: func(t *testing.T) string {
 				return writeMirrorFile(t, `
@@ -500,6 +566,141 @@ spec:
 			}
 			if !errors.Is(err, tt.wantErr) {
 				t.Errorf("expected error to wrap %v, got: %v", tt.wantErr, err)
+			}
+		})
+	}
+}
+
+func TestReplaceImagePullspec(t *testing.T) {
+	tests := []struct {
+		name   string
+		image  string
+		mirror string
+		want   string
+	}{
+		{
+			name:   "repo only",
+			image:  "registry.redhat.io/foo/bar",
+			mirror: "quay.io/mirror/bar",
+			want:   "quay.io/mirror/bar",
+		},
+		{
+			name:   "with tag",
+			image:  "registry.redhat.io/foo/bar:v1",
+			mirror: "quay.io/mirror/bar",
+			want:   "quay.io/mirror/bar:v1",
+		},
+		{
+			name:   "with digest",
+			image:  "registry.redhat.io/foo/bar@" + validDigest,
+			mirror: "quay.io/mirror/bar",
+			want:   "quay.io/mirror/bar@" + validDigest,
+		},
+		{
+			name:   "with tag and digest",
+			image:  "registry.redhat.io/foo/bar:v1@" + validDigest,
+			mirror: "quay.io/mirror/bar",
+			want:   "quay.io/mirror/bar:v1@" + validDigest,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			parsed, err := ParseImageURL(tt.image)
+			if err != nil {
+				t.Fatalf("parse image: %v", err)
+			}
+			got := ReplaceImagePullspec(parsed, tt.mirror)
+			if got != tt.want {
+				t.Errorf("got %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestResolveMirrors(t *testing.T) {
+	mirrors := MirrorConfigMap{
+		"registry.redhat.io/foo/bar": {
+			"quay.io/mirror/bar",
+			"brew.registry.redhat.io/foo/bar",
+		},
+		"registry.redhat.io/empty": {},
+	}
+
+	tests := []struct {
+		name      string
+		image     string
+		mirrorMap MirrorConfigMap
+		want      []string
+		wantErr   error
+	}{
+		{
+			name:      "exact match with tag",
+			image:     "registry.redhat.io/foo/bar:v1",
+			mirrorMap: mirrors,
+			want: []string{
+				"quay.io/mirror/bar:v1",
+				"brew.registry.redhat.io/foo/bar:v1",
+			},
+		},
+		{
+			name:      "exact match with digest",
+			image:     "registry.redhat.io/foo/bar@" + validDigest,
+			mirrorMap: mirrors,
+			want: []string{
+				"quay.io/mirror/bar@" + validDigest,
+				"brew.registry.redhat.io/foo/bar@" + validDigest,
+			},
+		},
+		{
+			name:      "no matching source",
+			image:     "registry.redhat.io/other/image:v1",
+			mirrorMap: mirrors,
+			want:      nil,
+		},
+		{
+			name:      "matched source with empty mirrors",
+			image:     "registry.redhat.io/empty:v1",
+			mirrorMap: mirrors,
+			want:      nil,
+		},
+		{
+			name:      "nil map",
+			image:     "registry.redhat.io/foo/bar:v1",
+			mirrorMap: nil,
+			want:      nil,
+		},
+		{
+			name:      "prefix does not match",
+			image:     "registry.redhat.io/foo/bar/child:v1",
+			mirrorMap: mirrors,
+			want:      nil,
+		},
+		{
+			name:      "invalid image",
+			image:     "ubuntu:latest",
+			mirrorMap: mirrors,
+			wantErr:   ErrInvalidImageReference,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := ResolveMirrors(tt.image, tt.mirrorMap)
+			if tt.wantErr != nil {
+				if err == nil {
+					t.Fatal("expected error, got nil")
+				}
+				if !errors.Is(err, tt.wantErr) {
+					t.Fatalf("error = %v, want wrap of %v", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if !slices.Equal(got, tt.want) {
+				t.Errorf("got %v, want %v", got, tt.want)
 			}
 		})
 	}
