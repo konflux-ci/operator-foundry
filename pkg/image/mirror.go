@@ -63,8 +63,6 @@ type MirrorConfigMap map[string][]string
 // Sources and mirrors must be YAML strings (not numbers or booleans).
 // Trailing YAML is handled like bash yq '.': empty separators and extra
 // valid documents are ignored; malformed trailing content fails parse.
-// Errors wrap ErrMirrorConfigReadFailed, ErrMirrorConfigParseFailed,
-// ErrInvalidMirrorSource, or ErrInvalidMirror.
 func LoadMirrorConfigFromFile(path string) (MirrorConfigMap, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -100,17 +98,32 @@ func LoadMirrorConfigFromFile(path string) (MirrorConfigMap, error) {
 	return mirrorConfigMap, nil
 }
 
-// decodeMirrorConfig unmarshals the first YAML document as an ImageDigestMirrorSet,
-// then walks the rest of the stream like bash yq '.': extra documents (empty or
-// valid) are ignored; malformed trailing YAML fails.
+// decodeMirrorConfig unmarshals the first non-empty YAML document as an
+// ImageDigestMirrorSet. It then walks the rest of the stream like bash yq '.'.
+// Extra documents (empty or valid) are ignored. Malformed trailing YAML fails.
 func decodeMirrorConfig(r io.Reader) (mirrorFileConfig, error) {
 	dec := yaml.NewDecoder(r)
 
-	// First document is the IDMS. Decode into mirrorFileConfig so yamlString
-	// rejects non-string source/mirror scalars during unmarshal.
+	// Skip empty leading documents (e.g. "---\n---\nspec:..."), then decode
+	// the first real document into mirrorFileConfig so yamlString rejects
+	// non-string source/mirror scalars during unmarshal.
 	var mirrorCfg mirrorFileConfig
-	if err := dec.Decode(&mirrorCfg); err != nil {
-		return mirrorFileConfig{}, err
+	for {
+		var doc yaml.Node
+		err := dec.Decode(&doc)
+		if errors.Is(err, io.EOF) {
+			return mirrorFileConfig{}, err
+		}
+		if err != nil {
+			return mirrorFileConfig{}, err
+		}
+		if isEmptyYAMLDocument(&doc) {
+			continue
+		}
+		if err := doc.Decode(&mirrorCfg); err != nil {
+			return mirrorFileConfig{}, err
+		}
+		break
 	}
 
 	// Drain trailing documents: ignore well-formed extras (bare "---", another
@@ -125,6 +138,23 @@ func decodeMirrorConfig(r io.Reader) (mirrorFileConfig, error) {
 			return mirrorFileConfig{}, err
 		}
 	}
+}
+
+// isEmptyYAMLDocument reports whether n is a null/empty YAML document, such as
+// a bare "---" separator with no content. DocumentNode wrappers are unwrapped
+// first; only a missing body or a !!null scalar counts as empty. Non-null
+// scalars, empty mappings, and sequences are real documents.
+func isEmptyYAMLDocument(n *yaml.Node) bool {
+	for n != nil && n.Kind == yaml.DocumentNode {
+		if len(n.Content) == 0 {
+			return true
+		}
+		n = n.Content[0]
+	}
+	if n == nil {
+		return true
+	}
+	return n.Kind == yaml.ScalarNode && n.ShortTag() == "!!null"
 }
 
 // validateIDMSRepositoryOrRegistry checks an ImageDigestMirrorSet source or
@@ -174,4 +204,39 @@ func validateIDMSRepositoryOrRegistry(ref string) error {
 	}
 	// e.g. "registry.redhat.io", "mirror.example.com:5000", "localhost"
 	return nil
+}
+
+// ReplaceImagePullspec swaps the registry/repository for mirror, preserving
+// tag and digest from parsedImageRef. Matches bash replace_image_pullspec:
+// mirror + optional :tag + optional @digest.
+func ReplaceImagePullspec(parsedImageRef ParsedImageURL, mirror string) string {
+	newImageRef := mirror
+	if parsedImageRef.Tag != "" {
+		newImageRef += ":" + parsedImageRef.Tag
+	}
+	if parsedImageRef.Digest != "" {
+		newImageRef += "@" + parsedImageRef.Digest
+	}
+	return newImageRef
+}
+
+// ResolveMirrors returns mirrored pullspecs for originalImageRef using an exact
+// registry/repository key lookup in mirrorMap (bash get_image_mirror_list
+// parity). Tag and digest from originalImageRef are preserved on each mirror.
+// No matching source, a nil map, or an empty mirror list yields (nil, nil).
+func ResolveMirrors(originalImageRef string, mirrorMap MirrorConfigMap) ([]string, error) {
+	parsedImageRef, err := ParseImageURL(originalImageRef)
+	if err != nil {
+		return nil, err
+	}
+	mirrorsConfigured, ok := mirrorMap[parsedImageRef.RegistryRepository]
+	if !ok || len(mirrorsConfigured) == 0 {
+		return nil, nil
+	}
+
+	mirrorsList := make([]string, 0, len(mirrorsConfigured))
+	for _, mirror := range mirrorsConfigured {
+		mirrorsList = append(mirrorsList, ReplaceImagePullspec(parsedImageRef, mirror))
+	}
+	return mirrorsList, nil
 }

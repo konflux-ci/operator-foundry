@@ -49,12 +49,15 @@ compatible with the target OCP version. Images with an OCI mediaType are
 incompatible with OCP versions earlier than v4.21.
 
 The related images are provided as a JSON file containing a list of image
-references.
+references. Optionally pass `--image-mirror-set-path` with an
+ImageDigestMirrorSet YAML file so unreachable original pullspecs are retried
+via configured mirrors.
 
 ```bash
 operator-foundry fbc check-related-images-mediatype \
   --ocp-version <version> \
   --related-images-json-path <path-to-json> \
+  [--image-mirror-set-path <path-to-idms-yaml>] \
   [--output <path-to-output-file>]
 ```
 
@@ -62,6 +65,8 @@ operator-foundry fbc check-related-images-mediatype \
 |---|---|
 | Related images JSON cannot be read or parsed | Exits with error |
 | OCP version is malformed | Exits with error |
+| ImageDigestMirrorSet path is set but the file is invalid | Exits with error |
+| ImageDigestMirrorSet path is set but the file is missing/unreadable | Continues without mirrors |
 | OCP version >= 4.21 (OCI supported natively) | Writes `SUCCESS` result, exit 0 (check skipped) |
 | All related images use compatible mediaType | Writes `SUCCESS` result, exit 0 |
 | One or more images use incompatible mediaType or cannot be fetched | Writes `FAILURE` result with counts of incompatible-mediaType and unavailable images in the note |
