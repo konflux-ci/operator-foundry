@@ -18,6 +18,7 @@ package mediatype
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -158,5 +159,53 @@ func TestMirroringFetcher_NilMirrorMap_Passthrough(t *testing.T) {
 	}
 	if len(inner.calls) != 1 {
 		t.Fatalf("calls = %v, want only original", inner.calls)
+	}
+}
+
+func TestMirroringFetcher_NilInner_ReturnsError(t *testing.T) {
+	fetcher := &MirroringFetcher{Inner: nil}
+	_, err := fetcher.FetchManifest(context.Background(), "registry.redhat.io/foo/bar:v1")
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+}
+
+// cancelOnCallFetcher fails every fetch and cancels the parent context on the
+// first call so the mirror loop can observe ctx.Done() before further attempts.
+type cancelOnCallFetcher struct {
+	cancel context.CancelFunc
+	calls  []string
+}
+
+func (s *cancelOnCallFetcher) FetchManifest(_ context.Context, imageRef string) (*remote.Descriptor, error) {
+	s.calls = append(s.calls, imageRef)
+	if len(s.calls) == 1 {
+		s.cancel()
+	}
+	return nil, fmt.Errorf("fetch failed for %s", imageRef)
+}
+
+func TestMirroringFetcher_ContextCancelled_SkipsRemainingMirrors(t *testing.T) {
+	original := "registry.redhat.io/foo/bar:v1"
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	inner := &cancelOnCallFetcher{cancel: cancel}
+	fetcher := &MirroringFetcher{
+		Inner: inner,
+		Mirrors: image.MirrorConfigMap{
+			"registry.redhat.io/foo/bar": {
+				"quay.io/mirror/bar",
+				"brew.registry.redhat.io/foo/bar",
+			},
+		},
+	}
+
+	_, err := fetcher.FetchManifest(ctx, original)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("got error %v, want context.Canceled", err)
+	}
+	if len(inner.calls) != 1 || inner.calls[0] != original {
+		t.Fatalf("calls = %v, want only original (no mirror attempts after cancel)", inner.calls)
 	}
 }

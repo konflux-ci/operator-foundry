@@ -18,14 +18,15 @@ package mediatype
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 
 	"github.com/google/go-containerregistry/pkg/v1/remote"
 	"github.com/konflux-ci/operator-foundry/pkg/image"
 )
 
-// MirroringFetcher wraps a ManifestFetcher and, when the original pullspec
-// fails, retries with mirrored pullspecs from an ImageDigestMirrorSet map
+// MirroringFetcher tries the original pullspec first, then falls back to
+// mirrors from an ImageDigestMirrorSet map when the original fetch fails
 // (bash try-original-then-mirrors parity).
 type MirroringFetcher struct {
 	Inner   ManifestFetcher
@@ -37,6 +38,9 @@ type MirroringFetcher struct {
 // successful fetch wins. If there are no mirrors or all attempts fail, the
 // last error is returned (original error when no mirrors were attempted).
 func (f *MirroringFetcher) FetchManifest(ctx context.Context, imageRef string) (*remote.Descriptor, error) {
+	if f.Inner == nil {
+		return nil, errors.New("mirroring fetcher has no inner ManifestFetcher")
+	}
 	desc, err := f.Inner.FetchManifest(ctx, imageRef)
 	if err == nil {
 		return desc, nil
@@ -61,8 +65,13 @@ func (f *MirroringFetcher) FetchManifest(ctx context.Context, imageRef string) (
 		"mirrors", mirrors,
 	)
 
-	var lastErr error = originalErr
+	lastErr := originalErr
 	for _, mirrorRef := range mirrors {
+		select {
+		case <-ctx.Done():
+			return nil, context.Cause(ctx)
+		default:
+		}
 		desc, err := f.Inner.FetchManifest(ctx, mirrorRef)
 		if err == nil {
 			slog.Info("fetched image via mirror",
