@@ -51,6 +51,12 @@ func GetBaseImage(ctx context.Context, inspector ImageInspector, imageRef string
 	manifestRef := registryRepo + "@" + digest
 	slog.Debug("selected manifest for base image lookup", "imageRef", imageRef, "digest", digest)
 
+	return GetBaseImageFromManifest(ctx, inspector, manifestRef)
+}
+
+// GetBaseImageFromManifest reads the OCI base image annotations from a resolved
+// image manifest and returns the base image reference with an optional digest pin.
+func GetBaseImageFromManifest(ctx context.Context, inspector ImageInspector, manifestRef string) (string, error) {
 	annotations, err := GetAnnotations(ctx, inspector, manifestRef)
 	if err != nil {
 		return "", err
