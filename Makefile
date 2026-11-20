@@ -7,7 +7,7 @@ build:
 	$(GO) build -o bin/$(BINARY) ./cmd/operator-foundry
 
 test:
-	$(GO) test ./... -v -race -count=1
+	$(GO) test ./... -v -race -count=1 -coverprofile=coverage.out -covermode=atomic
 
 lint:
 	golangci-lint run ./...
