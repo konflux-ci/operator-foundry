@@ -20,6 +20,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/konflux-ci/operator-foundry/pkg/mediatype"
 )
 
 func TestLoadRelatedImages_ValidList(t *testing.T) {
@@ -97,5 +99,59 @@ func TestLoadRelatedImages_NonexistentFile_ReturnsError(t *testing.T) {
 	_, err := loadRelatedImages("/nonexistent/related-images.json")
 	if err == nil {
 		t.Fatal("expected error for nonexistent file, got nil")
+	}
+}
+
+func TestNewMediaTypeFetcher_EmptyPath_ReturnsRegistryFetcher(t *testing.T) {
+	fetcher, err := newMediaTypeFetcher("")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, ok := fetcher.(*mediatype.RegistryFetcher); !ok {
+		t.Fatalf("got %T, want *mediatype.RegistryFetcher", fetcher)
+	}
+}
+
+func TestNewMediaTypeFetcher_MissingFile_ReturnsRegistryFetcher(t *testing.T) {
+	fetcher, err := newMediaTypeFetcher(filepath.Join(t.TempDir(), "missing-idms.yaml"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, ok := fetcher.(*mediatype.RegistryFetcher); !ok {
+		t.Fatalf("got %T, want *mediatype.RegistryFetcher", fetcher)
+	}
+}
+
+func TestNewMediaTypeFetcher_ValidFile_ReturnsMirroringFetcher(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "images-mirror-set.yaml")
+	content := `
+spec:
+  imageDigestMirrors:
+  - source: registry.redhat.io/foo
+    mirrors:
+    - quay.io/mirror/foo
+`
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatalf("write mirror set: %v", err)
+	}
+
+	fetcher, err := newMediaTypeFetcher(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, ok := fetcher.(*mediatype.MirroringFetcher); !ok {
+		t.Fatalf("got %T, want *mediatype.MirroringFetcher", fetcher)
+	}
+}
+
+func TestNewMediaTypeFetcher_InvalidFile_ReturnsError(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "bad.yaml")
+	if err := os.WriteFile(path, []byte("{{not valid"), 0644); err != nil {
+		t.Fatalf("write mirror set: %v", err)
+	}
+
+	_, err := newMediaTypeFetcher(path)
+	if err == nil {
+		t.Fatal("expected error for invalid mirror set, got nil")
 	}
 }
