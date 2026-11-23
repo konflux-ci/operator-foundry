@@ -28,9 +28,6 @@ import (
 )
 
 // Only olm.package names are returned, in input order, from a mixed catalog.
-// 1. Read the fixture containing packages, channels, bundles and custom metadata.
-// 2. Extract package names from the rendered JSON stream.
-// 3. Verify zeta precedes alpha and names from other schemas are excluded.
 func TestExtractUniquePackageNamesFromCatalog_Mixed(t *testing.T) {
 	got, err := ExtractUniquePackageNamesFromCatalog(strings.NewReader(extractorFixture(t, "mixed.json")))
 	assertExtractedStrings(t, got, err, []string{"zeta", "alpha"})
@@ -55,9 +52,6 @@ func TestExtractUniquePackageNamesFromCatalog_DeduplicatesPackages(t *testing.T)
 }
 
 // A read failure after a matching package must discard the name already extracted.
-// 1. Supply a complete alpha package followed by a reader returning a known error.
-// 2. Extract package names.
-// 3. Verify a nil result and errors.Is preserves the original failure.
 func TestExtractUniquePackageNamesFromCatalog_ReadError(t *testing.T) {
 	wantErr := errors.New("catalog read failed")
 	r := io.MultiReader(strings.NewReader(`{
@@ -150,9 +144,6 @@ func TestExtractCatalogMetadata_ReadErrorDiscardsPartialResults(t *testing.T) {
 }
 
 // Active zeta bundles retain first-seen input order and deduplicate image references.
-// 1. Read the mixed fixture containing other schemas, another package and a deprecated bundle.
-// 2. Extract bundles for zeta.
-// 3. Verify only the two unique active images remain, without sorting.
 func TestExtractUniqueBundlesFromCatalog_Mixed(t *testing.T) {
 	got, err := ExtractUniqueBundlesFromCatalog(strings.NewReader(extractorFixture(t, "mixed.json")), "zeta")
 	assertExtractedStrings(t, got, err, []string{
@@ -203,9 +194,6 @@ func TestExtractUniqueBundlesFromCatalog_EmptyPackageName(t *testing.T) {
 }
 
 // A reader failure after a matching bundle must discard its already extracted image.
-// 1. Supply an active alpha bundle followed by a known reader error.
-// 2. Extract bundle images for alpha.
-// 3. Verify nil and an error wrapping the original failure.
 func TestExtractUniqueBundlesFromCatalog_ReadError(t *testing.T) {
 	wantErr := errors.New("catalog read failed")
 	r := io.MultiReader(strings.NewReader(alphaBundle), failingCatalogReader{wantErr})
@@ -216,9 +204,6 @@ func TestExtractUniqueBundlesFromCatalog_ReadError(t *testing.T) {
 }
 
 // Related images are unique by image string and sorted, regardless of their descriptive names.
-// 1. Read the mixed fixture with duplicates within/across bundles and distinct bundle images.
-// 2. Extract related images for zeta and verify exactly the two sorted active references.
-// 3. Reuse the two same-name bundles alone so other names cannot mask loss of an image.
 func TestExtractUniqueRelatedImagesFromCatalog_Mixed(t *testing.T) {
 	input := extractorFixture(t, "mixed.json")
 	want := []string{
@@ -258,9 +243,6 @@ func TestExtractUniqueRelatedImagesFromCatalog_EmptyPackageName(t *testing.T) {
 }
 
 // A read error after a matching bundle must discard all related images already extracted.
-// 1. Supply an active alpha bundle with a related image followed by a known reader error.
-// 2. Extract related images for alpha.
-// 3. Verify nil and errors.Is matches the original failure.
 func TestExtractUniqueRelatedImagesFromCatalog_ReadError(t *testing.T) {
 	wantErr := errors.New("catalog read failed")
 	r := io.MultiReader(strings.NewReader(alphaBundle), failingCatalogReader{wantErr})
@@ -271,9 +253,6 @@ func TestExtractUniqueRelatedImagesFromCatalog_ReadError(t *testing.T) {
 }
 
 // Missing properties on a matching bundle fails extraction and discards earlier results.
-// 1. Supply a valid alpha bundle followed by a matching bundle without properties.
-// 2. Run both the bundle and related image extractors for alpha.
-// 3. Verify nil results and a properties error identifying the second record.
 func TestExtractCatalog_MissingBundleProperties(t *testing.T) {
 	input := alphaBundle + invalidAlphaBundleMissingProperties
 	for _, tc := range []struct {
@@ -309,9 +288,6 @@ func TestExtractCatalogMetadata_MissingBundlePropertiesDiscardsPartialResults(t 
 }
 
 // An olm.deprecations record never excludes a bundle; only an olm.deprecated property does.
-// 1. Load the fixture referencing v1.0.0 in a record and marking v2.0.0 with a property.
-// 2. Run all three extractors with the deprecations record before and after the bundles.
-// 3. Verify zeta and only v1.0.0's bundle/related image remain in either order.
 func TestExtractCatalog_DeprecationsRecord(t *testing.T) {
 	input := extractorFixture(t, "deprecations.json")
 	records := decodeFixtureRecords(t, input)

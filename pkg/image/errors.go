@@ -18,7 +18,7 @@ package image
 
 import "errors"
 
-// Parsing errors
+// Parsing errors.
 var (
 	// ErrEmptyImageURL is returned when the provided image reference is empty.
 	ErrEmptyImageURL = errors.New("image URL is empty")
@@ -26,7 +26,7 @@ var (
 	ErrInvalidImageReference = errors.New("invalid image reference")
 )
 
-// Inspection errors
+// Inspection errors.
 var (
 	// ErrRawInspectFailed is returned when the raw manifest fetch fails.
 	ErrRawInspectFailed = errors.New("raw manifest fetch failed")
