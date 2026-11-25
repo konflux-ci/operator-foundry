@@ -20,3 +20,9 @@ ignore:
 comment:
   layout: "reach,diff,flags,files,footer"
   require_changes: true
+
+flags:
+  unit-tests:
+    paths:
+      - "!vendor/"
+    carryforward: true
