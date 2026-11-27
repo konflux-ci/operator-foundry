@@ -35,7 +35,34 @@ type ocpVersion struct {
 	minor int
 }
 
+const fbcOCPVersionLabel = "com.redhat.fbc.openshift.version"
+
 var ocpVersionRegex = regexp.MustCompile(`^[4-9]\.(0|[1-9][0-9]*)$`)
+
+// GetOCPVersionFromFBCFragment returns the validated OCP versions from the
+// fragment's labels, preserving their order and spelling.
+// If the version label is absent, it returns the validated base image tag as
+// the only version. An error returns no versions.
+func GetOCPVersionFromFBCFragment(labels map[string]string, baseTag string) ([]string, error) {
+	raw, present := labels[fbcOCPVersionLabel]
+	if !present {
+		if err := ValidateOCPVersion(baseTag); err != nil {
+			return nil, fmt.Errorf("invalid base image tag: %w", err)
+		}
+		return []string{baseTag}, nil
+	}
+
+	versions, err := parseFBCOCPVersionLabel(raw)
+	if err != nil {
+		return nil, err
+	}
+	for i, version := range versions {
+		if err := ValidateOCPVersion(version); err != nil {
+			return nil, fmt.Errorf("label %q version %d: %w", fbcOCPVersionLabel, i+1, err)
+		}
+	}
+	return versions, nil
+}
 
 // GetOCPVersionsFromDockerfile returns the OCP versions targeted by the FBC fragment.
 // It first tries to read the com.redhat.fbc.openshift.version label,
@@ -80,22 +107,27 @@ func GetOCPVersionsFromDockerfile(d *dockerfile.Dockerfile, buildArgs map[string
 // from the Dockerfile and returns the list of targeted OCP versions.
 // Returns nil if the label is not present.
 func getOCPVersionsFromDockerfileLabel(d *dockerfile.Dockerfile) ([]string, error) {
-	const labelKey = "com.redhat.fbc.openshift.version"
-
-	raw := getFBCLabel(d, labelKey)
+	raw := getFBCLabel(d, fbcOCPVersionLabel)
 	if raw == "" {
 		return nil, nil
 	}
 
+	versions, err := parseFBCOCPVersionLabel(raw)
+	if err != nil {
+		return nil, err
+	}
+	slog.Info("determined OCP version(s) from Dockerfile label", "label", fbcOCPVersionLabel, "versions", versions)
+	return versions, nil
+}
+
+func parseFBCOCPVersionLabel(raw string) ([]string, error) {
 	var versions []string
 	if err := json.Unmarshal([]byte(raw), &versions); err != nil {
-		return nil, fmt.Errorf("label %q must contain a valid JSON array: %w", labelKey, err)
+		return nil, fmt.Errorf("label %q must contain a valid JSON array: %w", fbcOCPVersionLabel, err)
 	}
 	if len(versions) == 0 {
-		return nil, fmt.Errorf("label %q must contain a non-empty JSON array", labelKey)
+		return nil, fmt.Errorf("label %q must contain a non-empty JSON array", fbcOCPVersionLabel)
 	}
-
-	slog.Info("determined OCP version(s) from Dockerfile label", "label", labelKey, "versions", versions)
 	return versions, nil
 }
 
