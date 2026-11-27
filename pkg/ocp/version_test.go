@@ -19,10 +19,48 @@ package ocp
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/keilerkonzept/dockerfile-json/pkg/dockerfile"
 )
+
+func TestGetOCPVersionFromFBCFragment(t *testing.T) {
+	const label = "com.redhat.fbc.openshift.version"
+	tests := []struct {
+		name    string
+		labels  map[string]string
+		baseTag string
+		want    []string
+	}{
+		{"label takes precedence", map[string]string{label: `["v4.17","4.18"]`}, "v4.19", []string{"v4.17", "4.18"}},
+		{"missing label uses base tag", map[string]string{"author": "example"}, "v4.18", []string{"v4.18"}},
+		{"empty label", map[string]string{label: ""}, "v4.18", nil},
+		{"empty array", map[string]string{label: "[]"}, "v4.18", nil},
+		{"null label", map[string]string{label: "null"}, "v4.18", nil},
+		{"malformed JSON", map[string]string{label: "["}, "v4.18", nil},
+		{"numeric array entry", map[string]string{label: "[4.17]"}, "v4.18", nil},
+		{"version with surrounding whitespace", map[string]string{label: `[" 4.17 "]`}, "v4.18", nil},
+		{"invalid second version", map[string]string{label: `["v4.17","g"]`}, "v4.18", nil},
+		{"empty base tag", nil, "", nil},
+		{"invalid base tag", nil, "latest", nil},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := GetOCPVersionFromFBCFragment(tt.labels, tt.baseTag)
+			if tt.want == nil {
+				if err == nil || got != nil {
+					t.Fatalf("got (%v, %v), want nil versions and an error", got, err)
+				}
+				return
+			}
+			if err != nil || !slices.Equal(got, tt.want) {
+				t.Fatalf("got (%v, %v), want (%v, nil)", got, err, tt.want)
+			}
+		})
+	}
+}
 
 func mustParseDockerfile(t *testing.T, src string) *dockerfile.Dockerfile {
 	t.Helper()
@@ -374,7 +412,7 @@ func TestValidateOCPVersion_ValidFormats(t *testing.T) {
 }
 
 func TestValidateOCPVersion_InvalidFormats(t *testing.T) {
-	invalid := []string{"3.11", "4", "4.", ".15", "abc", "", "v", "4.15.1"}
+	invalid := []string{"3.11", "4", "4.", ".15", "abc", "", "v", "4.15.1", " 4.17 "}
 	for _, v := range invalid {
 		if err := ValidateOCPVersion(v); err == nil {
 			t.Errorf("expected error for %q, got nil", v)
